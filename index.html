@@ -1,0 +1,508 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Asistencia Visual — Fase 1</title>
+<meta name="theme-color" content="#0b0f14">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='45' fill='%234da8da'/%3E%3Ccircle cx='50' cy='50' r='18' fill='%230b0f14'/%3E%3C/svg%3E">
+<style>
+  :root{
+    --bg:#0b0f14;
+    --bg-elev:#141b23;
+    --text:#f2f5f7;
+    --text-dim:#a9b6c0;
+    --accent:#4da8da;
+    --warn:#e8a33d;
+    --danger:#e8683d;
+    --ok:#5fbf8f;
+    --border:#2a3540;
+    --target-min:64px;
+  }
+  *{box-sizing:border-box;}
+  html,body{
+    margin:0; padding:0; height:100%;
+    background:var(--bg); color:var(--text);
+    font-family: -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    -webkit-tap-highlight-color: transparent;
+    overscroll-behavior:none;
+  }
+  body{
+    display:flex; flex-direction:column; min-height:100dvh;
+  }
+  header{
+    padding:14px 16px; border-bottom:1px solid var(--border);
+    display:flex; align-items:center; justify-content:space-between; gap:12px;
+  }
+  header h1{ font-size:1.05rem; margin:0; font-weight:600; }
+  #statusPill{
+    display:inline-flex; align-items:center; gap:8px;
+    padding:6px 12px; border-radius:999px; border:1px solid var(--border);
+    background:var(--bg-elev); font-size:0.85rem; white-space:nowrap;
+  }
+  #statusPill .dot{ width:10px; height:10px; border-radius:50%; background:var(--text-dim); flex:0 0 auto; }
+  #statusPill[data-state="ok"] .dot{ background:var(--ok); }
+  #statusPill[data-state="warn"] .dot{ background:var(--warn); }
+  #statusPill[data-state="error"] .dot{ background:var(--danger); }
+
+  main{ flex:1; position:relative; display:flex; align-items:center; justify-content:center; padding:16px; }
+
+  /* Video oculto: solo se usa como fuente para el modelo, no se muestra por defecto */
+  #cam{
+    position:absolute; width:1px; height:1px; opacity:0; pointer-events:none;
+  }
+  #cam.debugVisible{
+    position:relative; width:min(90vw, 480px); height:auto; opacity:1;
+    border-radius:12px; border:1px solid var(--border); transform:scaleX(-1);
+  }
+
+  .panel{
+    max-width:520px; width:100%; background:var(--bg-elev); border:1px solid var(--border);
+    border-radius:16px; padding:28px 24px; text-align:center;
+  }
+  .panel h2{ margin:0 0 10px; font-size:1.3rem; }
+  .panel p{ margin:0 0 18px; color:var(--text-dim); line-height:1.5; font-size:1rem; }
+  .panel .icon{ font-size:2.2rem; margin-bottom:8px; display:block; }
+
+  button{
+    font-family:inherit; font-size:1rem; font-weight:600;
+    min-height:var(--target-min); min-width:var(--target-min);
+    padding:14px 22px; border-radius:12px; border:1px solid var(--border);
+    background:var(--accent); color:#04141f; cursor:pointer;
+  }
+  button:focus-visible{ outline:3px solid #fff; outline-offset:3px; }
+  button.secondary{ background:transparent; color:var(--text); border-color:var(--border); }
+  button:disabled{ opacity:0.5; cursor:not-allowed; }
+
+  #gazeCursor{
+    position:fixed; top:0; left:0; width:34px; height:34px; border-radius:50%;
+    border:3px solid var(--accent); background:rgba(77,168,218,0.18);
+    transform:translate(-50%,-50%); pointer-events:none; z-index:50;
+    display:none;
+  }
+  @media (prefers-reduced-motion: no-preference){
+    #gazeCursor{ transition: left 60ms linear, top 60ms linear; }
+  }
+
+  #fpsBadge{
+    position:fixed; bottom:10px; right:10px; font-size:0.75rem; color:var(--text-dim);
+    background:var(--bg-elev); border:1px solid var(--border); padding:4px 8px; border-radius:8px;
+    z-index:50;
+  }
+
+  footer{ padding:10px 16px; border-top:1px solid var(--border); font-size:0.78rem; color:var(--text-dim); text-align:center; }
+
+  .sr-only{
+    position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Asistencia Visual — Fase 1</h1>
+  <div id="statusPill" data-state="warn" role="status" aria-live="polite">
+    <span class="dot" aria-hidden="true"></span>
+    <span id="statusText">Iniciando…</span>
+  </div>
+</header>
+
+<main>
+  <!-- Video de cámara: fuente para el modelo, oculto por defecto -->
+  <video id="cam" autoplay playsinline muted></video>
+
+  <!-- Panel de permiso pendiente -->
+  <section id="panelPending" class="panel" aria-live="polite">
+    <span class="icon" aria-hidden="true">👁️</span>
+    <h2>Preparando cámara</h2>
+    <p>Esta app necesita acceso a tu cámara frontal para seguir tu mirada. Ningún video ni imagen sale de este dispositivo.</p>
+    <button id="btnRequestCam" type="button">Activar cámara</button>
+  </section>
+
+  <!-- Panel de permiso denegado -->
+  <section id="panelDenied" class="panel" hidden>
+    <span class="icon" aria-hidden="true">🚫</span>
+    <h2>Cámara bloqueada</h2>
+    <p>El navegador no tiene permiso para usar la cámara. Un cuidador puede habilitarlo desde el ícono de candado/información en la barra de direcciones y recargar esta página.</p>
+    <button id="btnRetryCam" type="button" class="secondary">Reintentar</button>
+  </section>
+
+  <!-- Panel de error de cámara (no encontrada / en uso) -->
+  <section id="panelCamError" class="panel" hidden>
+    <span class="icon" aria-hidden="true">⚠️</span>
+    <h2>No se pudo abrir la cámara</h2>
+    <p id="camErrorDetail">No se detectó una cámara disponible, o está siendo usada por otra aplicación.</p>
+    <button id="btnRetryCamError" type="button" class="secondary">Reintentar</button>
+  </section>
+
+  <!-- Panel de carga de modelo -->
+  <section id="panelModelLoading" class="panel" hidden>
+    <span class="icon" aria-hidden="true">⏳</span>
+    <h2>Cargando el modelo de visión</h2>
+    <p id="modelLoadingDetail">Descargando el motor de seguimiento facial (solo la primera vez, luego queda guardado en el dispositivo)…</p>
+  </section>
+
+  <!-- Panel de error de modelo -->
+  <section id="panelModelError" class="panel" hidden>
+    <span class="icon" aria-hidden="true">📡</span>
+    <h2>No se pudo cargar el motor de seguimiento</h2>
+    <p id="modelErrorDetail">Se necesita conexión a internet la primera vez para descargar el modelo. Verifica tu conexión e intenta de nuevo.</p>
+    <button id="btnRetryModel" type="button" class="secondary">Reintentar</button>
+  </section>
+
+  <!-- Panel activo: cámara + modelo funcionando -->
+  <section id="panelActive" class="panel" hidden>
+    <span class="icon" aria-hidden="true">✅</span>
+    <h2>Sistema activo</h2>
+    <p id="faceStatusDetail">Buscando tu rostro…</p>
+    <button id="btnToggleDebugVideo" type="button" class="secondary">Mostrar/ocultar cámara</button>
+  </section>
+</main>
+
+<div id="gazeCursor" aria-hidden="true"></div>
+<div id="fpsBadge" aria-hidden="true">— fps proc.</div>
+
+<footer>
+  Fase 1 de 4 — esqueleto PWA, cámara y cursor crudo. Sin calibración todavía.
+</footer>
+
+<script type="module">
+// =========================================================================
+// === PWA Registration ===
+// Manifest embebido vía Blob URL. Service Worker registrado desde un
+// blob inline (documentado el matiz de scope abajo).
+// =========================================================================
+
+const MANIFEST = {
+  name: "Asistencia Visual",
+  short_name: "AsistenciaVisual",
+  start_url: "./",
+  display: "standalone",
+  background_color: "#0b0f14",
+  theme_color: "#0b0f14",
+  icons: [
+    {
+      src: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'%3E%3Crect width='192' height='192' rx='32' fill='%230b0f14'/%3E%3Ccircle cx='96' cy='96' r='70' fill='%234da8da'/%3E%3Ccircle cx='96' cy='96' r='28' fill='%230b0f14'/%3E%3C/svg%3E",
+      sizes: "192x192",
+      type: "image/svg+xml"
+    }
+  ]
+  // NOTA DE LIMITACIÓN: algunos navegadores exigen íconos PNG reales (no
+  // data-URI SVG) para pasar el chequeo de "instalable". En un archivo
+  // único esto es un trade-off consciente: la app funciona igual sin
+  // instalarse como ícono de escritorio.
+};
+
+(function registerManifest(){
+  const blob = new Blob([JSON.stringify(MANIFEST)], { type: "application/manifest+json" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("link");
+  link.rel = "manifest";
+  link.href = url;
+  document.head.appendChild(link);
+})();
+
+// Código del Service Worker como string. Estrategia: cache-first para los
+// assets de MediaPipe (CDN jsDelivr + modelo .task de storage.googleapis.com)
+// que se piden en tiempo de ejecución, no en la carga del documento — por
+// eso NO se puede precachear una lista fija en "install": se cachea al
+// vuelo la primera vez que el JS del hilo principal los pide.
+const SW_SOURCE = `
+const RUNTIME_CACHE = "asistencia-visual-runtime-v1";
+const CDN_HOSTS = ["cdn.jsdelivr.net", "storage.googleapis.com"];
+
+self.addEventListener("install", (event) => {
+  self.skipWaiting();
+});
+
+self.addEventListener("activate", (event) => {
+  event.waitUntil(self.clients.claim());
+});
+
+self.addEventListener("fetch", (event) => {
+  const url = new URL(event.request.url);
+  if (CDN_HOSTS.includes(url.host)) {
+    event.respondWith(
+      caches.open(RUNTIME_CACHE).then(async (cache) => {
+        const cached = await cache.match(event.request);
+        if (cached) return cached;
+        try {
+          const response = await fetch(event.request);
+          if (response.ok) cache.put(event.request, response.clone());
+          return response;
+        } catch (err) {
+          if (cached) return cached;
+          throw err;
+        }
+      })
+    );
+  }
+  // Todo lo demás (el propio documento, si se sirve desde GitHub Pages)
+  // se deja pasar a la red normalmente en esta fase.
+});
+`;
+
+let swRegistration = null;
+
+async function registerServiceWorker(){
+  if (!("serviceWorker" in navigator)) return;
+  try {
+    const blob = new Blob([SW_SOURCE], { type: "application/javascript" });
+    const swUrl = URL.createObjectURL(blob);
+    // MATIZ DE SCOPE: un Service Worker registrado desde una blob: URL no
+    // tiene una ruta real de origen, así que el navegador no puede inferir
+    // el scope por la ubicación del script (como haría con un archivo
+    // sw.js normal). Hay que declarar el scope explícitamente y debe
+    // coincidir con la ruta del documento que lo registra, o el registro
+    // es rechazado. Aquí se usa "./" para que controle todo lo que esté
+    // bajo la carpeta donde vive este index.html en GitHub Pages.
+    swRegistration = await navigator.serviceWorker.register(swUrl, { scope: "./" });
+  } catch (err) {
+    console.warn("No se pudo registrar el Service Worker:", err);
+    // No es un fallo bloqueante: la app sigue funcionando online sin cache.
+  }
+}
+
+// =========================================================================
+// === Event Handlers === (referencias DOM y helpers de estado de UI)
+// =========================================================================
+
+const el = (id) => document.getElementById(id);
+const statusPill = el("statusPill");
+const statusText = el("statusText");
+
+const panels = {
+  pending: el("panelPending"),
+  denied: el("panelDenied"),
+  camError: el("panelCamError"),
+  modelLoading: el("panelModelLoading"),
+  modelError: el("panelModelError"),
+  active: el("panelActive"),
+};
+
+function showPanel(name){
+  for (const key in panels) panels[key].hidden = (key !== name);
+}
+
+function setStatus(state, text){
+  statusPill.dataset.state = state;
+  statusText.textContent = text;
+}
+
+const video = el("cam");
+const gazeCursor = el("gazeCursor");
+const fpsBadge = el("fpsBadge");
+const faceStatusDetail = el("faceStatusDetail");
+
+// =========================================================================
+// === Cámara: 3 estados explícitos (pendiente / denegada / concedida) ===
+// =========================================================================
+
+async function requestCamera(){
+  showPanel("pending");
+  setStatus("warn", "Solicitando cámara…");
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: "user", width: { ideal: 640 }, height: { ideal: 480 } },
+      audio: false
+    });
+    video.srcObject = stream;
+    await video.play();
+    setStatus("ok", "Cámara activa");
+    await initModelAndStart();
+  } catch (err) {
+    console.error("Error de cámara:", err);
+    if (err.name === "NotAllowedError" || err.name === "PermissionDeniedError") {
+      showPanel("denied");
+      setStatus("error", "Permiso denegado");
+    } else if (err.name === "NotFoundError" || err.name === "DevicesNotFoundError") {
+      el("camErrorDetail").textContent = "No se encontró ninguna cámara en este dispositivo.";
+      showPanel("camError");
+      setStatus("error", "Sin cámara");
+    } else if (err.name === "NotReadableError" || err.name === "TrackStartError") {
+      el("camErrorDetail").textContent = "La cámara parece estar en uso por otra aplicación. Ciérrala e inténtalo de nuevo.";
+      showPanel("camError");
+      setStatus("error", "Cámara ocupada");
+    } else {
+      el("camErrorDetail").textContent = "Ocurrió un error inesperado al abrir la cámara: " + err.message;
+      showPanel("camError");
+      setStatus("error", "Error de cámara");
+    }
+  }
+}
+
+el("btnRequestCam").addEventListener("click", requestCamera);
+el("btnRetryCam").addEventListener("click", requestCamera);
+el("btnRetryCamError").addEventListener("click", requestCamera);
+el("btnToggleDebugVideo").addEventListener("click", () => {
+  video.classList.toggle("debugVisible");
+});
+
+// =========================================================================
+// === MediaPipe Setup ===
+// Face Landmarker (Tasks Vision API), delegate GPU con fallback a CPU.
+// =========================================================================
+
+let faceLandmarker = null;
+let runningMode = "VIDEO";
+
+async function createLandmarker(delegate){
+  const { FilesetResolver, FaceLandmarker } = await import(
+    "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14"
+  );
+  const vision = await FilesetResolver.forVisionTasks(
+    "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm"
+  );
+  return await FaceLandmarker.createFromOptions(vision, {
+    baseOptions: {
+      modelAssetPath:
+        "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task",
+      delegate
+    },
+    outputFaceBlendshapes: false,
+    outputFacialTransformationMatrixes: false,
+    runningMode,
+    numFaces: 1
+  });
+}
+
+async function initModelAndStart(){
+  showPanel("modelLoading");
+  setStatus("warn", "Cargando modelo…");
+  try {
+    try {
+      faceLandmarker = await createLandmarker("GPU");
+    } catch (gpuErr) {
+      console.warn("Delegate GPU falló, probando CPU:", gpuErr);
+      el("modelLoadingDetail").textContent =
+        "El acelerador gráfico no está disponible; usando modo compatible (más lento)…";
+      faceLandmarker = await createLandmarker("CPU");
+    }
+    showPanel("active");
+    setStatus("ok", "Sistema activo");
+    startDetectionLoop();
+  } catch (err) {
+    console.error("Error cargando el modelo:", err);
+    if (!navigator.onLine) {
+      el("modelErrorDetail").textContent =
+        "No hay conexión a internet y el modelo aún no está guardado en este dispositivo. Conéctate una vez para descargarlo.";
+    } else {
+      el("modelErrorDetail").textContent =
+        "No se pudo inicializar el motor de seguimiento: " + err.message;
+    }
+    showPanel("modelError");
+    setStatus("error", "Modelo no disponible");
+  }
+}
+
+el("btnRetryModel").addEventListener("click", initModelAndStart);
+
+// =========================================================================
+// === Calibration ===
+// STUB para Fase 1. La Fase 2 añade el flujo de calibración de 4-9 puntos
+// y el mapeo cámara→pantalla real. Por ahora el cursor usa una proyección
+// cruda sin calibrar (ver bucle de detección abajo).
+// =========================================================================
+function mapGazeToScreenRaw(nx, ny){
+  // nx, ny llegan normalizados [0,1] en espacio de cámara (ya espejados).
+  // Proyección cruda 1:1 sobre la ventana, sin corrección de perspectiva
+  // ni de rango de movimiento ocular real. Placeholder intencional.
+  return { x: nx * window.innerWidth, y: ny * window.innerHeight };
+}
+
+// =========================================================================
+// === Dwell Logic ===
+// STUB para Fase 1. La Fase 2 añade el anillo de progreso, tiempo de
+// dwell configurable y zona muerta/histéresis. Fase 1 solo dibuja el
+// cursor crudo para verificar que el punto de mirada es razonable.
+// =========================================================================
+function updateDwellPlaceholder(screenPoint){
+  // Sin lógica de selección todavía; solo posiciona el cursor visual.
+  gazeCursor.style.display = "block";
+  gazeCursor.style.left = screenPoint.x + "px";
+  gazeCursor.style.top = screenPoint.y + "px";
+}
+
+// =========================================================================
+// Bucle de detección con limitador de FPS de inferencia (Riesgo #3):
+// se procesa 1 de cada N frames para no saturar CPU/batería en gama media.
+// =========================================================================
+
+const PROCESS_EVERY_N_FRAMES = Number(localStorage.getItem("av_frameSkip") || 2);
+let frameCounter = 0;
+let lastNoFaceWarnAt = 0;
+
+// Contador simple de fps de procesamiento (no de renderizado) para el badge.
+let procCount = 0;
+let procWindowStart = performance.now();
+
+function startDetectionLoop(){
+  function loop(){
+    if (!faceLandmarker || video.readyState < 2) {
+      requestAnimationFrame(loop);
+      return;
+    }
+    frameCounter++;
+    if (frameCounter % PROCESS_EVERY_N_FRAMES !== 0) {
+      requestAnimationFrame(loop);
+      return;
+    }
+    const nowMs = performance.now();
+    const result = faceLandmarker.detectForVideo(video, nowMs);
+
+    if (result.faceLandmarks && result.faceLandmarks.length > 0) {
+      const lm = result.faceLandmarks[0];
+      // Punto de referencia: promedio de los centros de iris izquierdo y
+      // derecho. El modelo face_landmarker.task incluye 478 landmarks;
+      // los índices 468 y 473 corresponden a los centros de iris
+      // (izquierdo y derecho respectivamente) y se mueven con la
+      // dirección de la mirada de forma más directa que los landmarks
+      // de párpado/canto ocular, que solo describen la apertura del ojo.
+      const leftIris = lm[468];
+      const rightIris = lm[473];
+      const avgX = (leftIris.x + rightIris.x) / 2;
+      const avgY = (leftIris.y + rightIris.y) / 2;
+      // La cámara frontal entrega la imagen sin espejar internamente en
+      // MediaPipe; se espeja aquí en X para que "mirar a la izquierda
+      // del usuario" mueva el cursor a la izquierda de su pantalla.
+      const mirroredX = 1 - avgX;
+
+      const screenPoint = mapGazeToScreenRaw(mirroredX, avgY);
+      updateDwellPlaceholder(screenPoint);
+
+      faceStatusDetail.textContent = "Rostro detectado — cursor crudo activo (sin calibrar).";
+    } else {
+      gazeCursor.style.display = "none";
+      const now = performance.now();
+      if (now - lastNoFaceWarnAt > 500) {
+        faceStatusDetail.textContent = "No se detecta tu rostro. Acércate o mejora la iluminación.";
+        lastNoFaceWarnAt = now;
+      }
+    }
+
+    procCount++;
+    const elapsedS = (nowMs - procWindowStart) / 1000;
+    if (elapsedS >= 1) {
+      fpsBadge.textContent = Math.round(procCount / elapsedS) + " fps proc.";
+      procCount = 0;
+      procWindowStart = nowMs;
+    }
+
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+}
+
+// =========================================================================
+// Orientación / resize: el cursor crudo usa window.innerWidth/innerHeight
+// en cada frame, así que landscape/portrait se ajustan solos sin estado
+// adicional que reconciliar.
+// =========================================================================
+
+// Arranque
+registerServiceWorker();
+showPanel("pending");
+setStatus("warn", "Esperando permiso de cámara…");
+</script>
+</body>
+</html>
