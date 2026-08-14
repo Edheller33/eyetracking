@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Asistencia Visual — Fase 1</title>
+<title>Asistencia Visual — Fase 2</title>
 <meta name="theme-color" content="#0b0f14">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='45' fill='%234da8da'/%3E%3Ccircle cx='50' cy='50' r='18' fill='%230b0f14'/%3E%3C/svg%3E">
 <style>
@@ -27,9 +27,7 @@
     -webkit-tap-highlight-color: transparent;
     overscroll-behavior:none;
   }
-  body{
-    display:flex; flex-direction:column; min-height:100dvh;
-  }
+  body{ display:flex; flex-direction:column; min-height:100dvh; }
   header{
     padding:14px 16px; border-bottom:1px solid var(--border);
     display:flex; align-items:center; justify-content:space-between; gap:12px;
@@ -47,10 +45,7 @@
 
   main{ flex:1; position:relative; display:flex; align-items:center; justify-content:center; padding:16px; }
 
-  /* Video oculto: solo se usa como fuente para el modelo, no se muestra por defecto */
-  #cam{
-    position:absolute; width:1px; height:1px; opacity:0; pointer-events:none;
-  }
+  #cam{ position:absolute; width:1px; height:1px; opacity:0; pointer-events:none; }
   #cam.debugVisible{
     position:relative; width:min(90vw, 480px); height:auto; opacity:1;
     border-radius:12px; border:1px solid var(--border); transform:scaleX(-1);
@@ -63,6 +58,7 @@
   .panel h2{ margin:0 0 10px; font-size:1.3rem; }
   .panel p{ margin:0 0 18px; color:var(--text-dim); line-height:1.5; font-size:1rem; }
   .panel .icon{ font-size:2.2rem; margin-bottom:8px; display:block; }
+  .panel .buttonRow{ display:flex; gap:12px; justify-content:center; flex-wrap:wrap; }
 
   button{
     font-family:inherit; font-size:1rem; font-weight:600;
@@ -73,16 +69,28 @@
   button:focus-visible{ outline:3px solid #fff; outline-offset:3px; }
   button.secondary{ background:transparent; color:var(--text); border-color:var(--border); }
   button:disabled{ opacity:0.5; cursor:not-allowed; }
+  /* Botones activables por permanencia (dwell): borde propio para que se
+     note que son "objetivos" del sistema de mirada, no solo de tacto. */
+  button[data-dwell="true"]{ border-width:2px; }
+  button[data-dwell="true"].dwellHover{ border-color: var(--accent); }
 
+  /* Cursor de mirada crudo (punto) */
   #gazeCursor{
-    position:fixed; top:0; left:0; width:34px; height:34px; border-radius:50%;
-    border:3px solid var(--accent); background:rgba(77,168,218,0.18);
-    transform:translate(-50%,-50%); pointer-events:none; z-index:50;
+    position:fixed; top:0; left:0; width:22px; height:22px; border-radius:50%;
+    background: var(--accent); box-shadow:0 0 0 2px #04141f;
+    transform:translate(-50%,-50%); pointer-events:none; z-index:60;
     display:none;
   }
-  @media (prefers-reduced-motion: no-preference){
-    #gazeCursor{ transition: left 60ms linear, top 60ms linear; }
+  /* Anillo de progreso de permanencia (dwell), alrededor del cursor */
+  #dwellRing{
+    position:fixed; top:0; left:0; width:64px; height:64px; border-radius:50%;
+    transform:translate(-50%,-50%); pointer-events:none; z-index:55;
+    display:none;
+    background: conic-gradient(var(--accent) 0deg, transparent 0deg);
+    -webkit-mask: radial-gradient(circle, transparent 22px, #000 24px);
+            mask: radial-gradient(circle, transparent 22px, #000 24px);
   }
+  #dwellRing.fired{ background: conic-gradient(var(--ok) 360deg, var(--ok) 360deg); }
 
   #fpsBadge{
     position:fixed; bottom:10px; right:10px; font-size:0.75rem; color:var(--text-dim);
@@ -92,6 +100,32 @@
 
   footer{ padding:10px 16px; border-top:1px solid var(--border); font-size:0.78rem; color:var(--text-dim); text-align:center; }
 
+  /* ==================== Overlay de calibración ==================== */
+  #calibOverlay{
+    position:fixed; inset:0; background:var(--bg); z-index:100;
+    display:none; flex-direction:column; align-items:center; justify-content:center;
+    text-align:center; padding:24px;
+  }
+  #calibOverlay.visible{ display:flex; }
+  #calibInstructions{ max-width:420px; color:var(--text-dim); font-size:1rem; line-height:1.5; margin-bottom:8px; }
+  #calibInstructions strong{ color:var(--text); }
+  .calibDot{
+    position:fixed; width:26px; height:26px; border-radius:50%;
+    background:var(--accent); transform:translate(-50%,-50%);
+    box-shadow:0 0 0 4px rgba(77,168,218,0.25);
+  }
+  .calibRing{
+    position:fixed; width:70px; height:70px; border-radius:50%;
+    transform:translate(-50%,-50%);
+    background: conic-gradient(var(--ok) 0deg, transparent 0deg);
+    -webkit-mask: radial-gradient(circle, transparent 26px, #000 28px);
+            mask: radial-gradient(circle, transparent 26px, #000 28px);
+  }
+  #calibProgressText{
+    position:fixed; top:16px; left:50%; transform:translateX(-50%);
+    color:var(--text-dim); font-size:0.9rem;
+  }
+
   .sr-only{
     position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap;
   }
@@ -100,7 +134,7 @@
 <body>
 
 <header>
-  <h1>Asistencia Visual — Fase 1</h1>
+  <h1>Asistencia Visual — Fase 2</h1>
   <div id="statusPill" data-state="warn" role="status" aria-live="polite">
     <span class="dot" aria-hidden="true"></span>
     <span id="statusText">Iniciando…</span>
@@ -108,10 +142,8 @@
 </header>
 
 <main>
-  <!-- Video de cámara: fuente para el modelo, oculto por defecto -->
   <video id="cam" autoplay playsinline muted></video>
 
-  <!-- Panel de permiso pendiente -->
   <section id="panelPending" class="panel" aria-live="polite">
     <span class="icon" aria-hidden="true">👁️</span>
     <h2>Preparando cámara</h2>
@@ -119,7 +151,6 @@
     <button id="btnRequestCam" type="button">Activar cámara</button>
   </section>
 
-  <!-- Panel de permiso denegado -->
   <section id="panelDenied" class="panel" hidden>
     <span class="icon" aria-hidden="true">🚫</span>
     <h2>Cámara bloqueada</h2>
@@ -127,7 +158,6 @@
     <button id="btnRetryCam" type="button" class="secondary">Reintentar</button>
   </section>
 
-  <!-- Panel de error de cámara (no encontrada / en uso) -->
   <section id="panelCamError" class="panel" hidden>
     <span class="icon" aria-hidden="true">⚠️</span>
     <h2>No se pudo abrir la cámara</h2>
@@ -135,14 +165,12 @@
     <button id="btnRetryCamError" type="button" class="secondary">Reintentar</button>
   </section>
 
-  <!-- Panel de carga de modelo -->
   <section id="panelModelLoading" class="panel" hidden>
     <span class="icon" aria-hidden="true">⏳</span>
     <h2>Cargando el modelo de visión</h2>
     <p id="modelLoadingDetail">Descargando el motor de seguimiento facial (solo la primera vez, luego queda guardado en el dispositivo)…</p>
   </section>
 
-  <!-- Panel de error de modelo -->
   <section id="panelModelError" class="panel" hidden>
     <span class="icon" aria-hidden="true">📡</span>
     <h2>No se pudo cargar el motor de seguimiento</h2>
@@ -150,27 +178,43 @@
     <button id="btnRetryModel" type="button" class="secondary">Reintentar</button>
   </section>
 
-  <!-- Panel activo: cámara + modelo funcionando -->
+  <section id="panelCalibFailed" class="panel" hidden>
+    <span class="icon" aria-hidden="true">🔄</span>
+    <h2>No se detectó tu rostro durante la calibración</h2>
+    <p>Asegúrate de tener buena luz y de mirar hacia la pantalla, luego vuelve a intentarlo.</p>
+    <button id="btnRetryCalib" type="button" class="secondary">Reintentar calibración</button>
+  </section>
+
   <section id="panelActive" class="panel" hidden>
     <span class="icon" aria-hidden="true">✅</span>
     <h2>Sistema activo</h2>
     <p id="faceStatusDetail">Buscando tu rostro…</p>
-    <button id="btnToggleDebugVideo" type="button" class="secondary">Mostrar/ocultar cámara</button>
+    <div class="buttonRow">
+      <button id="btnToggleDebugVideo" type="button" class="secondary" data-dwell="true">Mostrar/ocultar cámara</button>
+      <button id="btnRecalibrate" type="button" class="secondary" data-dwell="true">Recalibrar</button>
+    </div>
   </section>
 </main>
 
+<!-- Overlay de calibración: pantalla completa, sin botones que requieran
+     clic — cada punto se confirma quedándose mirándolo (permanencia),
+     igual que funcionará luego la selección normal. -->
+<div id="calibOverlay">
+  <div id="calibProgressText" aria-live="polite"></div>
+  <p id="calibInstructions"><strong>Calibración</strong> — mantén la cabeza cómoda y sigue el punto azul con la mirada. Cuando el anillo se complete, pasará solo al siguiente.</p>
+</div>
+
 <div id="gazeCursor" aria-hidden="true"></div>
+<div id="dwellRing" aria-hidden="true"></div>
 <div id="fpsBadge" aria-hidden="true">— fps proc.</div>
 
 <footer>
-  Fase 1 de 4 — esqueleto PWA, cámara y cursor crudo. Sin calibración todavía.
+  Fase 2 de 4 — calibración de 5 puntos, mapeo a pantalla completa y selección por permanencia (dwell).
 </footer>
 
 <script type="module">
 // =========================================================================
 // === PWA Registration ===
-// Manifest embebido vía Blob URL. Service Worker registrado desde un
-// blob inline (documentado el matiz de scope abajo).
 // =========================================================================
 
 const MANIFEST = {
@@ -187,37 +231,22 @@ const MANIFEST = {
       type: "image/svg+xml"
     }
   ]
-  // NOTA DE LIMITACIÓN: algunos navegadores exigen íconos PNG reales (no
-  // data-URI SVG) para pasar el chequeo de "instalable". En un archivo
-  // único esto es un trade-off consciente: la app funciona igual sin
-  // instalarse como ícono de escritorio.
 };
 
 (function registerManifest(){
   const blob = new Blob([JSON.stringify(MANIFEST)], { type: "application/manifest+json" });
-  const url = URL.createObjectURL(blob);
   const link = document.createElement("link");
   link.rel = "manifest";
-  link.href = url;
+  link.href = URL.createObjectURL(blob);
   document.head.appendChild(link);
 })();
 
-// Código del Service Worker como string. Estrategia: cache-first para los
-// assets de MediaPipe (CDN jsDelivr + modelo .task de storage.googleapis.com)
-// que se piden en tiempo de ejecución, no en la carga del documento — por
-// eso NO se puede precachear una lista fija en "install": se cachea al
-// vuelo la primera vez que el JS del hilo principal los pide.
 const SW_SOURCE = `
 const RUNTIME_CACHE = "asistencia-visual-runtime-v1";
 const CDN_HOSTS = ["cdn.jsdelivr.net", "storage.googleapis.com"];
 
-self.addEventListener("install", (event) => {
-  self.skipWaiting();
-});
-
-self.addEventListener("activate", (event) => {
-  event.waitUntil(self.clients.claim());
-});
+self.addEventListener("install", (event) => { self.skipWaiting(); });
+self.addEventListener("activate", (event) => { event.waitUntil(self.clients.claim()); });
 
 self.addEventListener("fetch", (event) => {
   const url = new URL(event.request.url);
@@ -237,34 +266,22 @@ self.addEventListener("fetch", (event) => {
       })
     );
   }
-  // Todo lo demás (el propio documento, si se sirve desde GitHub Pages)
-  // se deja pasar a la red normalmente en esta fase.
 });
 `;
-
-let swRegistration = null;
 
 async function registerServiceWorker(){
   if (!("serviceWorker" in navigator)) return;
   try {
     const blob = new Blob([SW_SOURCE], { type: "application/javascript" });
     const swUrl = URL.createObjectURL(blob);
-    // MATIZ DE SCOPE: un Service Worker registrado desde una blob: URL no
-    // tiene una ruta real de origen, así que el navegador no puede inferir
-    // el scope por la ubicación del script (como haría con un archivo
-    // sw.js normal). Hay que declarar el scope explícitamente y debe
-    // coincidir con la ruta del documento que lo registra, o el registro
-    // es rechazado. Aquí se usa "./" para que controle todo lo que esté
-    // bajo la carpeta donde vive este index.html en GitHub Pages.
-    swRegistration = await navigator.serviceWorker.register(swUrl, { scope: "./" });
+    await navigator.serviceWorker.register(swUrl, { scope: "./" });
   } catch (err) {
     console.warn("No se pudo registrar el Service Worker:", err);
-    // No es un fallo bloqueante: la app sigue funcionando online sin cache.
   }
 }
 
 // =========================================================================
-// === Event Handlers === (referencias DOM y helpers de estado de UI)
+// === Referencias DOM y helpers de estado de UI ===
 // =========================================================================
 
 const el = (id) => document.getElementById(id);
@@ -277,11 +294,13 @@ const panels = {
   camError: el("panelCamError"),
   modelLoading: el("panelModelLoading"),
   modelError: el("panelModelError"),
+  calibFailed: el("panelCalibFailed"),
   active: el("panelActive"),
 };
 
 function showPanel(name){
   for (const key in panels) panels[key].hidden = (key !== name);
+  calibOverlay.classList.remove("visible");
 }
 
 function setStatus(state, text){
@@ -291,11 +310,14 @@ function setStatus(state, text){
 
 const video = el("cam");
 const gazeCursor = el("gazeCursor");
+const dwellRing = el("dwellRing");
 const fpsBadge = el("fpsBadge");
 const faceStatusDetail = el("faceStatusDetail");
+const calibOverlay = el("calibOverlay");
+const calibProgressText = el("calibProgressText");
 
 // =========================================================================
-// === Cámara: 3 estados explícitos (pendiente / denegada / concedida) ===
+// === Cámara ===
 // =========================================================================
 
 async function requestCamera(){
@@ -334,17 +356,16 @@ async function requestCamera(){
 el("btnRequestCam").addEventListener("click", requestCamera);
 el("btnRetryCam").addEventListener("click", requestCamera);
 el("btnRetryCamError").addEventListener("click", requestCamera);
-el("btnToggleDebugVideo").addEventListener("click", () => {
-  video.classList.toggle("debugVisible");
-});
+el("btnRetryCalib").addEventListener("click", startCalibration);
+el("btnToggleDebugVideo").addEventListener("click", () => { video.classList.toggle("debugVisible"); });
+el("btnRecalibrate").addEventListener("click", () => { startCalibration(); });
 
 // =========================================================================
 // === MediaPipe Setup ===
-// Face Landmarker (Tasks Vision API), delegate GPU con fallback a CPU.
 // =========================================================================
 
 let faceLandmarker = null;
-let runningMode = "VIDEO";
+const runningMode = "VIDEO";
 
 async function createLandmarker(delegate){
   const { FilesetResolver, FaceLandmarker } = await import(
@@ -378,9 +399,14 @@ async function initModelAndStart(){
         "El acelerador gráfico no está disponible; usando modo compatible (más lento)…";
       faceLandmarker = await createLandmarker("CPU");
     }
-    showPanel("active");
-    setStatus("ok", "Sistema activo");
-    startDetectionLoop();
+    startRawLoop(); // arranca el bucle de lectura de landmarks (sin pintar cursor todavía)
+    const stored = loadStoredCalibration();
+    if (stored) {
+      calibration = stored;
+      enterActiveState();
+    } else {
+      startCalibration();
+    }
   } catch (err) {
     console.error("Error cargando el modelo:", err);
     if (!navigator.onLine) {
@@ -398,45 +424,22 @@ async function initModelAndStart(){
 el("btnRetryModel").addEventListener("click", initModelAndStart);
 
 // =========================================================================
-// === Calibration ===
-// STUB para Fase 1. La Fase 2 añade el flujo de calibración de 4-9 puntos
-// y el mapeo cámara→pantalla real. Por ahora el cursor usa una proyección
-// cruda sin calibrar (ver bucle de detección abajo).
-// =========================================================================
-function mapGazeToScreenRaw(nx, ny){
-  // nx, ny llegan normalizados [0,1] en espacio de cámara (ya espejados).
-  // Proyección cruda 1:1 sobre la ventana, sin corrección de perspectiva
-  // ni de rango de movimiento ocular real. Placeholder intencional.
-  return { x: nx * window.innerWidth, y: ny * window.innerHeight };
-}
-
-// =========================================================================
-// === Dwell Logic ===
-// STUB para Fase 1. La Fase 2 añade el anillo de progreso, tiempo de
-// dwell configurable y zona muerta/histéresis. Fase 1 solo dibuja el
-// cursor crudo para verificar que el punto de mirada es razonable.
-// =========================================================================
-function updateDwellPlaceholder(screenPoint){
-  // Sin lógica de selección todavía; solo posiciona el cursor visual.
-  gazeCursor.style.display = "block";
-  gazeCursor.style.left = screenPoint.x + "px";
-  gazeCursor.style.top = screenPoint.y + "px";
-}
-
-// =========================================================================
-// Bucle de detección con limitador de FPS de inferencia (Riesgo #3):
-// se procesa 1 de cada N frames para no saturar CPU/batería en gama media.
+// Bucle de lectura de landmarks. Corre siempre que el modelo está listo;
+// alimenta tanto la calibración como el cursor activo con el mismo punto
+// crudo (nx, ny) para que ambos usen exactamente la misma fuente de datos.
+// Limitador de FPS de inferencia (Riesgo #3): procesa 1 de cada N frames.
 // =========================================================================
 
 const PROCESS_EVERY_N_FRAMES = Number(localStorage.getItem("av_frameSkip") || 2);
 let frameCounter = 0;
-let lastNoFaceWarnAt = 0;
-
-// Contador simple de fps de procesamiento (no de renderizado) para el badge.
 let procCount = 0;
 let procWindowStart = performance.now();
 
-function startDetectionLoop(){
+let latestRaw = null;      // { nx, ny } normalizado [0,1], ya espejado en X
+let latestRawAt = 0;       // performance.now() del último dato válido
+let onRawSample = null;    // callback opcional (usado durante calibración)
+
+function startRawLoop(){
   function loop(){
     if (!faceLandmarker || video.readyState < 2) {
       requestAnimationFrame(loop);
@@ -452,32 +455,19 @@ function startDetectionLoop(){
 
     if (result.faceLandmarks && result.faceLandmarks.length > 0) {
       const lm = result.faceLandmarks[0];
-      // Punto de referencia: promedio de los centros de iris izquierdo y
-      // derecho. El modelo face_landmarker.task incluye 478 landmarks;
-      // los índices 468 y 473 corresponden a los centros de iris
-      // (izquierdo y derecho respectivamente) y se mueven con la
-      // dirección de la mirada de forma más directa que los landmarks
-      // de párpado/canto ocular, que solo describen la apertura del ojo.
+      // Centros de iris (índices 468 y 473 del modelo face_landmarker.task,
+      // 478 landmarks). Se promedian ambos ojos y se espeja en X porque la
+      // cámara frontal entrega la imagen sin espejar internamente.
       const leftIris = lm[468];
       const rightIris = lm[473];
       const avgX = (leftIris.x + rightIris.x) / 2;
       const avgY = (leftIris.y + rightIris.y) / 2;
-      // La cámara frontal entrega la imagen sin espejar internamente en
-      // MediaPipe; se espeja aquí en X para que "mirar a la izquierda
-      // del usuario" mueva el cursor a la izquierda de su pantalla.
-      const mirroredX = 1 - avgX;
-
-      const screenPoint = mapGazeToScreenRaw(mirroredX, avgY);
-      updateDwellPlaceholder(screenPoint);
-
-      faceStatusDetail.textContent = "Rostro detectado — cursor crudo activo (sin calibrar).";
+      latestRaw = { nx: 1 - avgX, ny: avgY };
+      latestRawAt = nowMs;
+      if (onRawSample) onRawSample(latestRaw);
+      faceStatusDetail && (faceStatusDetail.textContent = "Rostro detectado — cursor activo.");
     } else {
-      gazeCursor.style.display = "none";
-      const now = performance.now();
-      if (now - lastNoFaceWarnAt > 500) {
-        faceStatusDetail.textContent = "No se detecta tu rostro. Acércate o mejora la iluminación.";
-        lastNoFaceWarnAt = now;
-      }
+      latestRaw = null;
     }
 
     procCount++;
@@ -494,10 +484,317 @@ function startDetectionLoop(){
 }
 
 // =========================================================================
-// Orientación / resize: el cursor crudo usa window.innerWidth/innerHeight
-// en cada frame, así que landscape/portrait se ajustan solos sin estado
-// adicional que reconciliar.
+// === Calibration ===
+// 5 puntos (4 esquinas con margen + centro). Cada punto se confirma con
+// permanencia (sin clic): se espera un breve "asentamiento" y luego se
+// capturan muestras crudas durante una ventana de tiempo; se guarda la
+// mediana de esas muestras junto con la posición real del punto en
+// pantalla. Con las 5 parejas (punto real, punto crudo) se resuelve un
+// mapeo afín por mínimos cuadrados que convierte cualquier punto crudo
+// futuro en coordenadas de pantalla completas.
 // =========================================================================
+
+const CALIB_INSET = 0.09;        // 9% de margen desde cada borde
+const CALIB_SETTLE_MS = 700;     // tiempo para que el usuario ubique la mirada, sin grabar
+const CALIB_CAPTURE_MS = 1300;   // ventana de captura de muestras
+const CALIB_MIN_SAMPLES = 5;     // mínimo de muestras válidas para aceptar el punto
+const CALIB_MAX_WAIT_MS = 4000;  // si no hay suficientes muestras en este tiempo, el punto falla
+
+let calibration = null; // { A,B,C,D,E,F, forWidth, forHeight }
+
+function calibKey(){
+  return "av_calib_" + window.innerWidth + "x" + window.innerHeight;
+}
+
+function loadStoredCalibration(){
+  try {
+    const raw = localStorage.getItem(calibKey());
+    if (!raw) return null;
+    return JSON.parse(raw);
+  } catch { return null; }
+}
+
+function saveCalibration(calib){
+  try { localStorage.setItem(calibKey(), JSON.stringify(calib)); } catch {}
+}
+
+function calibPointsForViewport(){
+  const w = window.innerWidth, h = window.innerHeight;
+  const mx = w * CALIB_INSET, my = h * CALIB_INSET;
+  return [
+    { x: mx,       y: my       },
+    { x: w - mx,   y: my       },
+    { x: w / 2,    y: h / 2    },
+    { x: mx,       y: h - my   },
+    { x: w - mx,   y: h - my   },
+  ];
+}
+
+function median(arr){
+  const s = [...arr].sort((a,b)=>a-b);
+  const mid = Math.floor(s.length/2);
+  return s.length % 2 ? s[mid] : (s[mid-1]+s[mid])/2;
+}
+
+// Resuelve un sistema 3x3 [A,B,C] por regla de Cramer.
+function solve3x3(m, rhs){
+  const det = (a) =>
+    a[0][0]*(a[1][1]*a[2][2]-a[1][2]*a[2][1]) -
+    a[0][1]*(a[1][0]*a[2][2]-a[1][2]*a[2][0]) +
+    a[0][2]*(a[1][0]*a[2][1]-a[1][1]*a[2][0]);
+  const D = det(m);
+  if (Math.abs(D) < 1e-9) return null;
+  const replace = (col) => m.map((row, i) => row.map((v, j) => j === col ? rhs[i] : v));
+  return [ det(replace(0))/D, det(replace(1))/D, det(replace(2))/D ];
+}
+
+function fitAffineMapping(samples){
+  // samples: [{ rawX, rawY, screenX, screenY }, ...]
+  let Sxx=0,Sxy=0,Sx=0,Syy=0,Sy=0,n=samples.length;
+  let SxSX=0, SySX=0, SSX=0, SxSY=0, SySY=0, SSY=0;
+  for (const s of samples) {
+    Sxx += s.rawX*s.rawX; Sxy += s.rawX*s.rawY; Sx += s.rawX;
+    Syy += s.rawY*s.rawY; Sy += s.rawY;
+    SxSX += s.rawX*s.screenX; SySX += s.rawY*s.screenX; SSX += s.screenX;
+    SxSY += s.rawX*s.screenY; SySY += s.rawY*s.screenY; SSY += s.screenY;
+  }
+  const M = [ [Sxx,Sxy,Sx], [Sxy,Syy,Sy], [Sx,Sy,n] ];
+  const solX = solve3x3(M, [SxSX, SySX, SSX]);
+  const solY = solve3x3(M, [SxSY, SySY, SSY]);
+  if (!solX || !solY) return null;
+  return { A: solX[0], B: solX[1], C: solX[2], D: solY[0], E: solY[1], F: solY[2] };
+}
+
+function applyCalibration(calib, nx, ny){
+  return {
+    x: calib.A*nx + calib.B*ny + calib.C,
+    y: calib.D*nx + calib.E*ny + calib.F
+  };
+}
+
+let calibDotEl = null, calibRingEl = null, calibRAF = null;
+
+function startCalibration(){
+  showPanel(null); // oculta todos los paneles de tarjeta
+  for (const key in panels) panels[key].hidden = true;
+  calibOverlay.classList.add("visible");
+  gazeCursor.style.display = "none";
+  dwellRing.style.display = "none";
+  setStatus("warn", "Calibrando…");
+
+  if (!calibDotEl) {
+    calibDotEl = document.createElement("div");
+    calibDotEl.className = "calibDot";
+    calibRingEl = document.createElement("div");
+    calibRingEl.className = "calibRing";
+    calibOverlay.appendChild(calibRingEl);
+    calibOverlay.appendChild(calibDotEl);
+  }
+
+  const points = calibPointsForViewport();
+  const collected = [];
+  let pointIndex = 0;
+
+  function runPoint(){
+    if (pointIndex >= points.length) {
+      finishCalibration();
+      return;
+    }
+    const p = points[pointIndex];
+    calibDotEl.style.left = p.x + "px";
+    calibDotEl.style.top = p.y + "px";
+    calibRingEl.style.left = p.x + "px";
+    calibRingEl.style.top = p.y + "px";
+    calibRingEl.style.background = "conic-gradient(var(--ok) 0deg, transparent 0deg)";
+    calibProgressText.textContent = "Punto " + (pointIndex+1) + " de " + points.length;
+
+    const samples = [];
+    let captureStart = null;
+    const waitDeadline = performance.now() + CALIB_MAX_WAIT_MS;
+    let phase = "settle";
+    let settleStart = performance.now();
+
+    function tick(){
+      const now = performance.now();
+
+      if (phase === "settle") {
+        if (now - settleStart >= CALIB_SETTLE_MS) {
+          phase = "capture";
+          captureStart = now;
+        }
+        calibRAF = requestAnimationFrame(tick);
+        return;
+      }
+
+      if (phase === "capture") {
+        if (latestRaw && (now - latestRawAt) < 400) {
+          samples.push(latestRaw);
+        }
+        const elapsed = now - captureStart;
+        const pct = Math.min(1, elapsed / CALIB_CAPTURE_MS);
+        calibRingEl.style.background =
+          "conic-gradient(var(--ok) " + (pct*360) + "deg, transparent " + (pct*360) + "deg)";
+
+        const enoughSamples = samples.length >= CALIB_MIN_SAMPLES;
+        const timeUp = elapsed >= CALIB_CAPTURE_MS;
+        const hardTimeout = now > waitDeadline;
+
+        if ((timeUp && enoughSamples) || hardTimeout) {
+          if (!enoughSamples) {
+            // Punto fallido: no hubo suficiente detección de rostro.
+            showPanel("calibFailed");
+            setStatus("error", "Calibración incompleta");
+            return;
+          }
+          const nxs = samples.map(s => s.nx);
+          const nys = samples.map(s => s.ny);
+          collected.push({
+            rawX: median(nxs), rawY: median(nys),
+            screenX: p.x, screenY: p.y
+          });
+          pointIndex++;
+          runPoint();
+          return;
+        }
+        calibRAF = requestAnimationFrame(tick);
+        return;
+      }
+    }
+    calibRAF = requestAnimationFrame(tick);
+  }
+
+  function finishCalibration(){
+    const fitted = fitAffineMapping(collected);
+    if (!fitted) {
+      showPanel("calibFailed");
+      setStatus("error", "Calibración incompleta");
+      return;
+    }
+    calibration = fitted;
+    saveCalibration(fitted);
+    enterActiveState();
+  }
+
+  runPoint();
+}
+
+// =========================================================================
+// === Dwell Logic ===
+// Suavizado (media móvil exponencial) sobre el punto ya mapeado a pantalla,
+// y selección por permanencia: si el cursor permanece sobre el mismo
+// elemento marcado con data-dwell="true" durante DWELL_MS, se dispara un
+// clic sintético sobre ese elemento — así una persona sin movilidad en
+// brazos puede "pulsar" botones solo con la mirada.
+// =========================================================================
+
+const DWELL_MS = Number(localStorage.getItem("av_dwellMs") || 900);
+const DWELL_COOLDOWN_MS = 600;
+const SMOOTHING_ALPHA = 0.3;
+
+let smoothedX = null, smoothedY = null;
+let dwellTarget = null, dwellStartedAt = 0, dwellCoolingDownUntil = 0;
+let activeLoopRunning = false;
+
+function enterActiveState(){
+  showPanel("active");
+  setStatus("ok", "Sistema activo");
+  smoothedX = null; smoothedY = null;
+  dwellTarget = null;
+  if (!activeLoopRunning) {
+    activeLoopRunning = true;
+    requestAnimationFrame(activeLoop);
+  }
+}
+
+function activeLoop(){
+  // El overlay de calibración, si está visible, tiene prioridad y este
+  // bucle simplemente no mueve el cursor mientras tanto.
+  if (calibOverlay.classList.contains("visible")) {
+    requestAnimationFrame(activeLoop);
+    return;
+  }
+
+  if (latestRaw && calibration && (performance.now() - latestRawAt) < 400) {
+    const mapped = applyCalibration(calibration, latestRaw.nx, latestRaw.ny);
+    const clampedX = Math.max(0, Math.min(window.innerWidth, mapped.x));
+    const clampedY = Math.max(0, Math.min(window.innerHeight, mapped.y));
+
+    smoothedX = (smoothedX === null) ? clampedX : smoothedX + (clampedX - smoothedX) * SMOOTHING_ALPHA;
+    smoothedY = (smoothedY === null) ? clampedY : smoothedY + (clampedY - smoothedY) * SMOOTHING_ALPHA;
+
+    gazeCursor.style.display = "block";
+    gazeCursor.style.left = smoothedX + "px";
+    gazeCursor.style.top = smoothedY + "px";
+
+    updateDwell(smoothedX, smoothedY);
+  } else {
+    gazeCursor.style.display = "none";
+    dwellRing.style.display = "none";
+    dwellTarget = null;
+  }
+
+  requestAnimationFrame(activeLoop);
+}
+
+function updateDwell(x, y){
+  const now = performance.now();
+  const under = document.elementFromPoint(x, y);
+  const candidate = under ? under.closest('[data-dwell="true"]') : null;
+
+  if (now < dwellCoolingDownUntil) {
+    dwellRing.style.display = "none";
+    return;
+  }
+
+  if (candidate !== dwellTarget) {
+    dwellTarget = candidate;
+    dwellStartedAt = now;
+  }
+
+  if (!dwellTarget) {
+    dwellRing.style.display = "none";
+    document.querySelectorAll(".dwellHover").forEach(n => n.classList.remove("dwellHover"));
+    return;
+  }
+
+  dwellTarget.classList.add("dwellHover");
+  const elapsed = now - dwellStartedAt;
+  const pct = Math.min(1, elapsed / DWELL_MS);
+
+  dwellRing.style.display = "block";
+  dwellRing.style.left = x + "px";
+  dwellRing.style.top = y + "px";
+  dwellRing.classList.remove("fired");
+  dwellRing.style.background =
+    "conic-gradient(var(--accent) " + (pct*360) + "deg, transparent " + (pct*360) + "deg)";
+
+  if (pct >= 1) {
+    dwellRing.classList.add("fired");
+    dwellTarget.classList.remove("dwellHover");
+    dwellTarget.click();
+    dwellCoolingDownUntil = now + DWELL_COOLDOWN_MS;
+    dwellTarget = null;
+  }
+}
+
+// =========================================================================
+// Cambios de tamaño/orientación: la calibración es específica del tamaño
+// de viewport. Si cambia y no hay una calibración guardada para el nuevo
+// tamaño, se vuelve a calibrar automáticamente.
+// =========================================================================
+let resizeDebounce = null;
+window.addEventListener("resize", () => {
+  clearTimeout(resizeDebounce);
+  resizeDebounce = setTimeout(() => {
+    if (!faceLandmarker) return; // aún no hay modelo cargado, nada que hacer
+    const stored = loadStoredCalibration();
+    if (stored) {
+      calibration = stored;
+    } else if (!calibOverlay.classList.contains("visible")) {
+      startCalibration();
+    }
+  }, 400);
+});
 
 // Arranque
 registerServiceWorker();
