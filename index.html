@@ -189,9 +189,14 @@
     <span class="icon" aria-hidden="true">✅</span>
     <h2>Sistema activo</h2>
     <p id="faceStatusDetail">Buscando tu rostro…</p>
+    <p id="sensitivityDetail" style="font-size:0.85rem; margin-top:-6px;">Sensibilidad: <span id="sensitivityValue">—</span></p>
     <div class="buttonRow">
       <button id="btnToggleDebugVideo" type="button" class="secondary" data-dwell="true">Mostrar/ocultar cámara</button>
       <button id="btnRecalibrate" type="button" class="secondary" data-dwell="true">Recalibrar</button>
+    </div>
+    <div class="buttonRow" style="margin-top:12px;">
+      <button id="btnLessSensitive" type="button" class="secondary" data-dwell="true">Menos sensible</button>
+      <button id="btnMoreSensitive" type="button" class="secondary" data-dwell="true">Más sensible</button>
     </div>
   </section>
 </main>
@@ -360,6 +365,30 @@ el("btnRetryCalib").addEventListener("click", startCalibration);
 el("btnToggleDebugVideo").addEventListener("click", () => { video.classList.toggle("debugVisible"); });
 el("btnRecalibrate").addEventListener("click", () => { startCalibration(); });
 
+function refreshSensitivityLabel(){
+  const m = currentMarginFactorForCalib();
+  // Traducimos el número técnico a una etiqueta legible de 1 a 5
+  // (margen más alto = menos sensible = número más bajo en la escala).
+  let label;
+  if (m >= 0.6) label = "1 (muy suave)";
+  else if (m >= 0.45) label = "2";
+  else if (m >= 0.3) label = "3";
+  else if (m >= 0.15) label = "4";
+  else label = "5 (muy sensible)";
+  el("sensitivityValue").textContent = label;
+}
+function adjustSensitivity(delta){
+  // delta positivo = más margen = MENOS sensible
+  const next = Math.min(0.75, Math.max(0.05, currentMarginFactorForCalib() + delta));
+  localStorage.setItem("av_marginFactor", String(next));
+  refreshSensitivityLabel();
+  // El margen queda grabado dentro de cada calibración guardada, así que
+  // el cambio solo se nota recalibrando.
+  startCalibration();
+}
+el("btnLessSensitive").addEventListener("click", () => adjustSensitivity(0.12));
+el("btnMoreSensitive").addEventListener("click", () => adjustSensitivity(-0.12));
+
 // =========================================================================
 // === MediaPipe Setup ===
 // =========================================================================
@@ -502,11 +531,11 @@ const CALIB_MAX_WAIT_MS = 4000;  // si no hay suficientes muestras en este tiemp
 
 let calibration = null; // { A,B,C,D,E,F, forWidth, forHeight }
 
-// "v2" en la clave invalida automáticamente cualquier calibración guardada
-// por la versión anterior (mapeo afín), que usaba una forma de datos
-// distinta ({A..F}) incompatible con el nuevo applyCalibration min-max.
+// "v3" invalida calibraciones guardadas por versiones anteriores (el
+// margen de sensibilidad quedó grabado dentro de cada calibración, así
+// que cambiar MARGIN_FACTOR por defecto no tiene efecto hasta recalibrar).
 function calibKey(){
-  return "av_calib_v2_" + window.innerWidth + "x" + window.innerHeight;
+  return "av_calib_v3_" + window.innerWidth + "x" + window.innerHeight;
 }
 
 function loadStoredCalibration(){
@@ -550,7 +579,12 @@ function median(arr){
 // un margen positivo ensancha el rango de entrada considerado (hay que
 // mirar más allá del punto de calibración para llegar al borde real),
 // lo que reduce la sensibilidad y hace el cursor más fácil de controlar.
-const MARGIN_FACTOR = Number(localStorage.getItem("av_marginFactor") || 0.22);
+// La sensibilidad se lee en cada calibración (no queda fija en una
+// constante) porque el usuario puede ajustarla desde los botones
+// "Menos sensible" / "Más sensible" del panel activo.
+function currentMarginFactorForCalib(){
+  return Number(localStorage.getItem("av_marginFactor") || 0.45);
+}
 
 function fitMinMaxCalibration(samples){
   // samples[0..4] = [arribaIzq, arribaDer, centro, abajoIzq, abajoDer]
@@ -565,6 +599,7 @@ function fitMinMaxCalibration(samples){
 
   const xRange = Math.max(xMax - xMin, 0.001);
   const yRange = Math.max(yMax - yMin, 0.001);
+  const MARGIN_FACTOR = currentMarginFactorForCalib();
   const xMargin = xRange * MARGIN_FACTOR;
   const yMargin = yRange * MARGIN_FACTOR;
 
@@ -713,6 +748,7 @@ let activeLoopRunning = false;
 function enterActiveState(){
   showPanel("active");
   setStatus("ok", "Sistema activo");
+  refreshSensitivityLabel();
   smoothedX = null; smoothedY = null;
   dwellTarget = null;
   if (!activeLoopRunning) {
