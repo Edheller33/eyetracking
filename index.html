@@ -209,7 +209,7 @@
 <div id="fpsBadge" aria-hidden="true">— fps proc.</div>
 
 <footer>
-  Fase 2 de 4 — calibración de 5 puntos, mapeo a pantalla completa y selección por permanencia (dwell).
+  Fase 2 de 4 (rev. mapeo estable) — calibración de 5 puntos, mapeo a pantalla completa y selección por permanencia (dwell).
 </footer>
 
 <script type="module">
@@ -489,9 +489,9 @@ function startRawLoop(){
 // permanencia (sin clic): se espera un breve "asentamiento" y luego se
 // capturan muestras crudas durante una ventana de tiempo; se guarda la
 // mediana de esas muestras junto con la posición real del punto en
-// pantalla. Con las 5 parejas (punto real, punto crudo) se resuelve un
-// mapeo afín por mínimos cuadrados que convierte cualquier punto crudo
-// futuro en coordenadas de pantalla completas.
+// pantalla. Con las 5 parejas (punto real, punto crudo) se calcula un
+// mapeo min-max con margen (ver fitMinMaxCalibration) que convierte
+// cualquier punto crudo futuro en coordenadas de pantalla completas.
 // =========================================================================
 
 const CALIB_INSET = 0.09;        // 9% de margen desde cada borde
@@ -502,8 +502,11 @@ const CALIB_MAX_WAIT_MS = 4000;  // si no hay suficientes muestras en este tiemp
 
 let calibration = null; // { A,B,C,D,E,F, forWidth, forHeight }
 
+// "v2" en la clave invalida automáticamente cualquier calibración guardada
+// por la versión anterior (mapeo afín), que usaba una forma de datos
+// distinta ({A..F}) incompatible con el nuevo applyCalibration min-max.
 function calibKey(){
-  return "av_calib_" + window.innerWidth + "x" + window.innerHeight;
+  return "av_calib_v2_" + window.innerWidth + "x" + window.innerHeight;
 }
 
 function loadStoredCalibration(){
@@ -536,39 +539,47 @@ function median(arr){
   return s.length % 2 ? s[mid] : (s[mid-1]+s[mid])/2;
 }
 
-// Resuelve un sistema 3x3 [A,B,C] por regla de Cramer.
-function solve3x3(m, rhs){
-  const det = (a) =>
-    a[0][0]*(a[1][1]*a[2][2]-a[1][2]*a[2][1]) -
-    a[0][1]*(a[1][0]*a[2][2]-a[1][2]*a[2][0]) +
-    a[0][2]*(a[1][0]*a[2][1]-a[1][1]*a[2][0]);
-  const D = det(m);
-  if (Math.abs(D) < 1e-9) return null;
-  const replace = (col) => m.map((row, i) => row.map((v, j) => j === col ? rhs[i] : v));
-  return [ det(replace(0))/D, det(replace(1))/D, det(replace(2))/D ];
-}
+// === Mapeo por normalización min-max (reemplaza la regresión afín) ===
+// La regresión afín por mínimos cuadrados usada antes resultó demasiado
+// sensible: como el rango crudo real del iris es minúsculo, la matriz de
+// mínimos cuadrados queda mal condicionada y cualquier micro-ruido se
+// amplifica de forma extrema, pegando el cursor a los bordes/esquinas de
+// la pantalla en vez de moverlo proporcionalmente (confirmado en pruebas
+// reales del usuario). La normalización min-max es más simple, no
+// invierte matrices, y su "ganancia" es controlable con MARGIN_FACTOR:
+// un margen positivo ensancha el rango de entrada considerado (hay que
+// mirar más allá del punto de calibración para llegar al borde real),
+// lo que reduce la sensibilidad y hace el cursor más fácil de controlar.
+const MARGIN_FACTOR = Number(localStorage.getItem("av_marginFactor") || 0.22);
 
-function fitAffineMapping(samples){
-  // samples: [{ rawX, rawY, screenX, screenY }, ...]
-  let Sxx=0,Sxy=0,Sx=0,Syy=0,Sy=0,n=samples.length;
-  let SxSX=0, SySX=0, SSX=0, SxSY=0, SySY=0, SSY=0;
-  for (const s of samples) {
-    Sxx += s.rawX*s.rawX; Sxy += s.rawX*s.rawY; Sx += s.rawX;
-    Syy += s.rawY*s.rawY; Sy += s.rawY;
-    SxSX += s.rawX*s.screenX; SySX += s.rawY*s.screenX; SSX += s.screenX;
-    SxSY += s.rawX*s.screenY; SySY += s.rawY*s.screenY; SSY += s.screenY;
-  }
-  const M = [ [Sxx,Sxy,Sx], [Sxy,Syy,Sy], [Sx,Sy,n] ];
-  const solX = solve3x3(M, [SxSX, SySX, SSX]);
-  const solY = solve3x3(M, [SxSY, SySY, SSY]);
-  if (!solX || !solY) return null;
-  return { A: solX[0], B: solX[1], C: solX[2], D: solY[0], E: solY[1], F: solY[2] };
+function fitMinMaxCalibration(samples){
+  // samples[0..4] = [arribaIzq, arribaDer, centro, abajoIzq, abajoDer]
+  const [tl, tr, , bl, br] = samples;
+  let xMin = median([tl.rawX, bl.rawX]);
+  let xMax = median([tr.rawX, br.rawX]);
+  let yMin = median([tl.rawY, tr.rawY]);
+  let yMax = median([bl.rawY, br.rawY]);
+
+  if (xMax < xMin) { const t = xMin; xMin = xMax; xMax = t; }
+  if (yMax < yMin) { const t = yMin; yMin = yMax; yMax = t; }
+
+  const xRange = Math.max(xMax - xMin, 0.001);
+  const yRange = Math.max(yMax - yMin, 0.001);
+  const xMargin = xRange * MARGIN_FACTOR;
+  const yMargin = yRange * MARGIN_FACTOR;
+
+  return {
+    xMin: xMin - xMargin, xMax: xMax + xMargin,
+    yMin: yMin - yMargin, yMax: yMax + yMargin
+  };
 }
 
 function applyCalibration(calib, nx, ny){
+  const fx = (nx - calib.xMin) / (calib.xMax - calib.xMin);
+  const fy = (ny - calib.yMin) / (calib.yMax - calib.yMin);
   return {
-    x: calib.A*nx + calib.B*ny + calib.C,
-    y: calib.D*nx + calib.E*ny + calib.F
+    x: fx * window.innerWidth,
+    y: fy * window.innerHeight
   };
 }
 
@@ -664,7 +675,7 @@ function startCalibration(){
   }
 
   function finishCalibration(){
-    const fitted = fitAffineMapping(collected);
+    const fitted = fitMinMaxCalibration(collected);
     if (!fitted) {
       showPanel("calibFailed");
       setStatus("error", "Calibración incompleta");
@@ -689,7 +700,11 @@ function startCalibration(){
 
 const DWELL_MS = Number(localStorage.getItem("av_dwellMs") || 900);
 const DWELL_COOLDOWN_MS = 600;
-const SMOOTHING_ALPHA = 0.3;
+// Suavizado más fuerte que en el primer intento (0.3 → 0.18): con el
+// nuevo mapeo min-max el cursor ya es menos "nervioso" de por sí, pero
+// más suavizado ayuda a compensar el jitter natural de la detección de
+// iris sin sentirse pesado.
+const SMOOTHING_ALPHA = Number(localStorage.getItem("av_smoothingAlpha") || 0.18);
 
 let smoothedX = null, smoothedY = null;
 let dwellTarget = null, dwellStartedAt = 0, dwellCoolingDownUntil = 0;
