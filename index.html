@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Asistencia Visual — Fase 2</title>
+<title>Asistencia Visual — Fase 3</title>
 <meta name="theme-color" content="#0b0f14">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='45' fill='%234da8da'/%3E%3Ccircle cx='50' cy='50' r='18' fill='%230b0f14'/%3E%3C/svg%3E">
 <style>
@@ -134,7 +134,7 @@
 <body>
 
 <header>
-  <h1>Asistencia Visual — Fase 2</h1>
+  <h1>Asistencia Visual — Fase 3</h1>
   <div id="statusPill" data-state="warn" role="status" aria-live="polite">
     <span class="dot" aria-hidden="true"></span>
     <span id="statusText">Iniciando…</span>
@@ -185,6 +185,20 @@
     <button id="btnRetryCalib" type="button" class="secondary">Reintentar calibración</button>
   </section>
 
+  <section id="panelRuntimeError" class="panel" hidden>
+    <span class="icon" aria-hidden="true">💥</span>
+    <h2>El seguimiento se interrumpió</h2>
+    <p id="runtimeErrorDetail">Ocurrió un problema repetido al procesar la cámara. Un cuidador puede recargar la página para reiniciar el sistema.</p>
+    <button id="btnReloadRuntime" type="button" class="secondary">Recargar aplicación</button>
+  </section>
+
+  <section id="panelCamLost" class="panel" hidden>
+    <span class="icon" aria-hidden="true">🔌</span>
+    <h2>Se perdió la conexión con la cámara</h2>
+    <p>La cámara se desconectó o fue tomada por otra aplicación. Verifica que ninguna otra app la esté usando y reintenta.</p>
+    <button id="btnRetryCamLost" type="button" class="secondary">Reintentar</button>
+  </section>
+
   <section id="panelActive" class="panel" hidden>
     <span class="icon" aria-hidden="true">✅</span>
     <h2>Sistema activo</h2>
@@ -214,7 +228,7 @@
 <div id="fpsBadge" aria-hidden="true">— fps proc.</div>
 
 <footer>
-  Fase 2 de 4 (rev. mapeo estable) — calibración de 5 puntos, mapeo a pantalla completa y selección por permanencia (dwell).
+  Fase 3 de 4 — calibración de 5 puntos, mapeo a pantalla completa, filtro Un-Euro con gating de parpadeo y selección por permanencia (dwell).
 </footer>
 
 <script type="module">
@@ -231,9 +245,19 @@ const MANIFEST = {
   theme_color: "#0b0f14",
   icons: [
     {
+      // Ícono vectorial: al ser SVG, el mismo dato sirve para 192 y 512
+      // sin generar rasters adicionales. purpose "any maskable" cubre
+      // tanto el ícono normal como la máscara adaptativa de Android.
       src: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'%3E%3Crect width='192' height='192' rx='32' fill='%230b0f14'/%3E%3Ccircle cx='96' cy='96' r='70' fill='%234da8da'/%3E%3Ccircle cx='96' cy='96' r='28' fill='%230b0f14'/%3E%3C/svg%3E",
       sizes: "192x192",
-      type: "image/svg+xml"
+      type: "image/svg+xml",
+      purpose: "any maskable"
+    },
+    {
+      src: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'%3E%3Crect width='192' height='192' rx='32' fill='%230b0f14'/%3E%3Ccircle cx='96' cy='96' r='70' fill='%234da8da'/%3E%3Ccircle cx='96' cy='96' r='28' fill='%230b0f14'/%3E%3C/svg%3E",
+      sizes: "512x512",
+      type: "image/svg+xml",
+      purpose: "any maskable"
     }
   ]
 };
@@ -300,6 +324,8 @@ const panels = {
   modelLoading: el("panelModelLoading"),
   modelError: el("panelModelError"),
   calibFailed: el("panelCalibFailed"),
+  runtimeError: el("panelRuntimeError"),
+  camLost: el("panelCamLost"),
   active: el("panelActive"),
 };
 
@@ -320,6 +346,7 @@ const fpsBadge = el("fpsBadge");
 const faceStatusDetail = el("faceStatusDetail");
 const calibOverlay = el("calibOverlay");
 const calibProgressText = el("calibProgressText");
+let cameraActive = false;
 
 // =========================================================================
 // === Cámara ===
@@ -336,6 +363,20 @@ async function requestCamera(){
     video.srcObject = stream;
     await video.play();
     setStatus("ok", "Cámara activa");
+    cameraActive = true;
+    // Riesgo #4 (auditoría): si el sistema operativo o el usuario cierra
+    // el track de video en medio de una sesión (cámara tomada por otra
+    // app, permiso revocado, etc.), el bucle de lectura debe enterarse
+    // y llevar a la persona a un estado claro en vez de quedarse
+    // procesando frames obsoletos en silencio.
+    const track = stream.getVideoTracks()[0];
+    if (track) {
+      track.onended = () => {
+        cameraActive = false;
+        showPanel("camLost");
+        setStatus("error", "Cámara desconectada");
+      };
+    }
     await initModelAndStart();
   } catch (err) {
     console.error("Error de cámara:", err);
@@ -362,6 +403,8 @@ el("btnRequestCam").addEventListener("click", requestCamera);
 el("btnRetryCam").addEventListener("click", requestCamera);
 el("btnRetryCamError").addEventListener("click", requestCamera);
 el("btnRetryCalib").addEventListener("click", startCalibration);
+el("btnRetryCamLost").addEventListener("click", requestCamera);
+el("btnReloadRuntime").addEventListener("click", () => window.location.reload());
 el("btnToggleDebugVideo").addEventListener("click", () => { video.classList.toggle("debugVisible"); });
 el("btnRecalibrate").addEventListener("click", () => { startCalibration(); });
 
@@ -382,9 +425,29 @@ function adjustSensitivity(delta){
   const next = Math.min(0.75, Math.max(0.05, currentMarginFactorForCalib() + delta));
   localStorage.setItem("av_marginFactor", String(next));
   refreshSensitivityLabel();
-  // El margen queda grabado dentro de cada calibración guardada, así que
-  // el cambio solo se nota recalibrando.
-  startCalibration();
+  // Mejora (auditoría P2): antes, cualquier cambio de sensibilidad exigía
+  // recalibrar los 5 puntos completos. Ahora, si la calibración activa
+  // guarda los límites crudos previos al margen (rawXMin/rawXMax/...),
+  // el nuevo margen se reaplica en vivo sobre esos mismos límites. Solo
+  // se recalibra desde cero si no hay esos datos (p. ej. calibración de
+  // una versión anterior de la app que no los guardaba).
+  if (calibration && calibration.rawXMin !== undefined) {
+    calibration = remapCalibrationMargin(calibration, next);
+    saveCalibration(calibration);
+  } else if (!calibOverlay.classList.contains("visible")) {
+    startCalibration();
+  }
+}
+
+function remapCalibrationMargin(calib, marginFactor){
+  const xRange = Math.max(calib.rawXMax - calib.rawXMin, 0.001);
+  const yRange = Math.max(calib.rawYMax - calib.rawYMin, 0.001);
+  const xMargin = xRange * marginFactor, yMargin = yRange * marginFactor;
+  return {
+    ...calib,
+    xMin: calib.rawXMin - xMargin, xMax: calib.rawXMax + xMargin,
+    yMin: calib.rawYMin - yMargin, yMax: calib.rawYMax + yMargin
+  };
 }
 el("btnLessSensitive").addEventListener("click", () => adjustSensitivity(0.12));
 el("btnMoreSensitive").addEventListener("click", () => adjustSensitivity(-0.12));
@@ -409,7 +472,13 @@ async function createLandmarker(delegate){
         "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task",
       delegate
     },
-    outputFaceBlendshapes: false,
+    // Fase 3 (auditoría P1): se activan los blendshapes para poder leer
+    // eyeBlinkLeft/eyeBlinkRight y detectar parpadeo real. Sin esto, un
+    // parpadeo no se distingue de una pérdida de rostro: MediaPipe puede
+    // seguir devolviendo landmarks de iris ruidosos con los ojos cerrados,
+    // y ese ruido se colaría en el filtro de suavizado como si fuera
+    // movimiento real de la mirada. El costo de cómputo adicional es bajo.
+    outputFaceBlendshapes: true,
     outputFacialTransformationMatrixes: false,
     runningMode,
     numFaces: 1
@@ -464,13 +533,44 @@ let frameCounter = 0;
 let procCount = 0;
 let procWindowStart = performance.now();
 
+// Umbral único de "dato fresco": antes estaba duplicado como literal 400
+// en dos lugares distintos del archivo (auditoría #5). Ahora es una sola
+// constante nombrada que ambos puntos de uso comparten.
+const DATA_FRESHNESS_MS = 400;
+
+// Umbral de parpadeo sobre el blendshape eyeBlinkLeft/Right (0..1).
+// Por encima de este valor se considera que el ojo está cerrado y la
+// muestra de esa iteración se descarta en vez de alimentar el filtro.
+const BLINK_THRESHOLD = 0.5;
+// Tras esta cantidad de errores consecutivos en detectForVideo, se deja
+// de intentar en silencio y se muestra un estado de error explícito
+// (auditoría #3 — riesgo de congelamiento silencioso del cursor).
+const ERROR_STREAK_LIMIT = 5;
+
 let latestRaw = null;      // { nx, ny } normalizado [0,1], ya espejado en X
-let latestRawAt = 0;       // performance.now() del último dato válido
+let latestRawAt = 0;       // performance.now() del último dato válido (incluye congelado por parpadeo)
+let isBlinking = false;    // estado de parpadeo del frame más reciente con rostro detectado
 let onRawSample = null;    // callback opcional (usado durante calibración)
+let errorStreak = 0;
+let rawLoopHalted = false;
+
+function blinkScoreFrom(faceBlendshapes){
+  if (!faceBlendshapes || !faceBlendshapes.length) return 0;
+  const categories = faceBlendshapes[0].categories || [];
+  let left = 0, right = 0;
+  for (const c of categories) {
+    if (c.categoryName === "eyeBlinkLeft") left = c.score;
+    else if (c.categoryName === "eyeBlinkRight") right = c.score;
+  }
+  return (left + right) / 2;
+}
 
 function startRawLoop(){
+  rawLoopHalted = false;
+  errorStreak = 0;
   function loop(){
-    if (!faceLandmarker || video.readyState < 2) {
+    if (rawLoopHalted) return; // se detuvo tras exceso de errores; ver catch más abajo
+    if (!faceLandmarker || !cameraActive || video.readyState < 2) {
       requestAnimationFrame(loop);
       return;
     }
@@ -480,23 +580,57 @@ function startRawLoop(){
       return;
     }
     const nowMs = performance.now();
-    const result = faceLandmarker.detectForVideo(video, nowMs);
 
-    if (result.faceLandmarks && result.faceLandmarks.length > 0) {
-      const lm = result.faceLandmarks[0];
-      // Centros de iris (índices 468 y 473 del modelo face_landmarker.task,
-      // 478 landmarks). Se promedian ambos ojos y se espeja en X porque la
-      // cámara frontal entrega la imagen sin espejar internamente.
-      const leftIris = lm[468];
-      const rightIris = lm[473];
-      const avgX = (leftIris.x + rightIris.x) / 2;
-      const avgY = (leftIris.y + rightIris.y) / 2;
-      latestRaw = { nx: 1 - avgX, ny: avgY };
-      latestRawAt = nowMs;
-      if (onRawSample) onRawSample(latestRaw);
-      faceStatusDetail && (faceStatusDetail.textContent = "Rostro detectado — cursor activo.");
-    } else {
+    try {
+      const result = faceLandmarker.detectForVideo(video, nowMs);
+
+      if (result.faceLandmarks && result.faceLandmarks.length > 0) {
+        isBlinking = blinkScoreFrom(result.faceBlendshapes) > BLINK_THRESHOLD;
+
+        if (!isBlinking) {
+          // Centros de iris (índices 468 y 473 del modelo face_landmarker.task,
+          // 478 landmarks). Se promedian ambos ojos y se espeja en X porque la
+          // cámara frontal entrega la imagen sin espejar internamente.
+          const lm = result.faceLandmarks[0];
+          const leftIris = lm[468];
+          const rightIris = lm[473];
+          const avgX = (leftIris.x + rightIris.x) / 2;
+          const avgY = (leftIris.y + rightIris.y) / 2;
+          latestRaw = { nx: 1 - avgX, ny: avgY };
+          latestRawAt = nowMs;
+          if (onRawSample) onRawSample(latestRaw);
+          faceStatusDetail && (faceStatusDetail.textContent = "Rostro detectado — cursor activo.");
+        } else {
+          // Parpadeo: deliberadamente NO se actualiza latestRaw/latestRawAt.
+          // El consumidor (activeLoop) seguirá viendo la última posición
+          // válida como "fresca" hasta DATA_FRESHNESS_MS, es decir, el
+          // cursor se congela en su sitio durante el parpadeo en vez de
+          // saltar con datos de iris ruidosos por el ojo cerrado. Si el
+          // parpadeo (u oclusión) dura más que ese umbral, el flujo normal
+          // de "sin dato reciente" toma el control (oculta cursor/dwell).
+          faceStatusDetail && (faceStatusDetail.textContent = "Rostro detectado — cursor activo.");
+        }
+      } else {
+        isBlinking = false;
+        latestRaw = null;
+      }
+      errorStreak = 0;
+    } catch (err) {
+      // Riesgo #3 de la auditoría: antes, una excepción aquí (p. ej. el
+      // video deja de ser válido a mitad de sesión) rompía el bucle de
+      // rAF por completo sin ningún aviso — el cursor quedaba congelado
+      // para siempre sin que la persona pudiera saber qué pasó. Ahora se
+      // tolera un puñado de errores transitorios y, si persisten, se
+      // detiene el bucle de forma controlada y se muestra un panel claro.
+      console.warn("Error en detectForVideo:", err);
       latestRaw = null;
+      errorStreak++;
+      if (errorStreak > ERROR_STREAK_LIMIT) {
+        rawLoopHalted = true;
+        showPanel("runtimeError");
+        setStatus("error", "Seguimiento interrumpido");
+        return;
+      }
     }
 
     procCount++;
@@ -597,6 +731,11 @@ function fitMinMaxCalibration(samples){
   if (xMax < xMin) { const t = xMin; xMin = xMax; xMax = t; }
   if (yMax < yMin) { const t = yMin; yMin = yMax; yMax = t; }
 
+  // Se conservan los límites crudos (antes de margen) para que la
+  // sensibilidad pueda ajustarse después en vivo (ver remapCalibrationMargin)
+  // sin necesidad de repetir los 5 puntos de calibración.
+  const rawXMin = xMin, rawXMax = xMax, rawYMin = yMin, rawYMax = yMax;
+
   const xRange = Math.max(xMax - xMin, 0.001);
   const yRange = Math.max(yMax - yMin, 0.001);
   const MARGIN_FACTOR = currentMarginFactorForCalib();
@@ -605,7 +744,8 @@ function fitMinMaxCalibration(samples){
 
   return {
     xMin: xMin - xMargin, xMax: xMax + xMargin,
-    yMin: yMin - yMargin, yMax: yMax + yMargin
+    yMin: yMin - yMargin, yMax: yMax + yMargin,
+    rawXMin, rawXMax, rawYMin, rawYMax
   };
 }
 
@@ -673,7 +813,7 @@ function startCalibration(){
       }
 
       if (phase === "capture") {
-        if (latestRaw && (now - latestRawAt) < 400) {
+        if (latestRaw && (now - latestRawAt) < DATA_FRESHNESS_MS) {
           samples.push(latestRaw);
         }
         const elapsed = now - captureStart;
@@ -726,20 +866,77 @@ function startCalibration(){
 
 // =========================================================================
 // === Dwell Logic ===
-// Suavizado (media móvil exponencial) sobre el punto ya mapeado a pantalla,
-// y selección por permanencia: si el cursor permanece sobre el mismo
-// elemento marcado con data-dwell="true" durante DWELL_MS, se dispara un
-// clic sintético sobre ese elemento — así una persona sin movilidad en
-// brazos puede "pulsar" botones solo con la mirada.
+// Suavizado sobre el punto ya mapeado a pantalla, y selección por
+// permanencia: si el cursor permanece sobre el mismo elemento marcado con
+// data-dwell="true" durante DWELL_MS, se dispara un clic sintético sobre
+// ese elemento — así una persona sin movilidad en brazos puede "pulsar"
+// botones solo con la mirada.
+//
+// Fase 3 (auditoría P1): el suavizado por media móvil exponencial (alpha
+// fijo) obligaba a elegir entre temblor visible con la mirada fija o
+// retardo perceptible al moverla rápido — no podía resolver ambos casos
+// con el mismo valor. Se sustituye por el filtro Un-Euro (Casiez et al.,
+// 2012): reduce el corte de frecuencia (más suavizado) cuando la
+// velocidad estimada del punto es baja —mirada fija, mata el temblor— y
+// lo aumenta (menos suavizado) cuando la velocidad sube —movimiento
+// rápido, evita el retardo—. Es un reemplazo directo del EMA: misma
+// entrada (punto ya mapeado y recortado a pantalla), misma salida
+// (smoothedX/Y), sin tocar el resto de la lógica de dwell.
 // =========================================================================
 
 const DWELL_MS = Number(localStorage.getItem("av_dwellMs") || 900);
 const DWELL_COOLDOWN_MS = 600;
-// Suavizado más fuerte que en el primer intento (0.3 → 0.18): con el
-// nuevo mapeo min-max el cursor ya es menos "nervioso" de por sí, pero
-// más suavizado ayuda a compensar el jitter natural de la detección de
-// iris sin sentirse pesado.
-const SMOOTHING_ALPHA = Number(localStorage.getItem("av_smoothingAlpha") || 0.18);
+
+class OneEuroFilter {
+  constructor(minCutoff = 1.0, beta = 0.0, dCutoff = 1.0) {
+    this.minCutoff = minCutoff;
+    this.beta = beta;
+    this.dCutoff = dCutoff;
+    this.x = null;
+    this.dx = 0;
+    this.lastTime = null;
+  }
+  alpha(cutoff, dt) {
+    const tau = 1.0 / (2 * Math.PI * cutoff);
+    return 1.0 / (1.0 + tau / dt);
+  }
+  filter(value, timestampMs) {
+    if (this.lastTime === null) {
+      this.lastTime = timestampMs;
+      this.x = value;
+      return value;
+    }
+    // dt en segundos; se acota un mínimo para evitar división por ~0 si
+    // dos muestras llegan con el mismo timestamp.
+    const dt = Math.max((timestampMs - this.lastTime) / 1000, 0.001);
+    this.lastTime = timestampMs;
+
+    const dValue = (value - this.x) / dt;
+    const dxAlpha = this.alpha(this.dCutoff, dt);
+    this.dx = this.dx + dxAlpha * (dValue - this.dx);
+
+    const cutoff = this.minCutoff + this.beta * Math.abs(this.dx);
+    const a = this.alpha(cutoff, dt);
+    this.x = this.x + a * (value - this.x);
+    return this.x;
+  }
+  // Se debe llamar al perder el rostro por completo (más allá de la
+  // ventana de gracia) para que, al recuperarlo, el filtro no calcule un
+  // dt gigante desde la última muestra y produzca un salto.
+  reset(){
+    this.x = null;
+    this.dx = 0;
+    this.lastTime = null;
+  }
+}
+
+// minCutoff/beta tuneables igual que av_marginFactor, porque el punto de
+// partida (valores por defecto razonables) suele necesitar ajuste fino
+// con el usuario real.
+const ONEEURO_MIN_CUTOFF = Number(localStorage.getItem("av_oneEuroMinCutoff") || 0.5);
+const ONEEURO_BETA = Number(localStorage.getItem("av_oneEuroBeta") || 0.05);
+const filterX = new OneEuroFilter(ONEEURO_MIN_CUTOFF, ONEEURO_BETA);
+const filterY = new OneEuroFilter(ONEEURO_MIN_CUTOFF, ONEEURO_BETA);
 
 let smoothedX = null, smoothedY = null;
 let dwellTarget = null, dwellStartedAt = 0, dwellCoolingDownUntil = 0;
@@ -750,6 +947,7 @@ function enterActiveState(){
   setStatus("ok", "Sistema activo");
   refreshSensitivityLabel();
   smoothedX = null; smoothedY = null;
+  filterX.reset(); filterY.reset();
   dwellTarget = null;
   if (!activeLoopRunning) {
     activeLoopRunning = true;
@@ -765,13 +963,19 @@ function activeLoop(){
     return;
   }
 
-  if (latestRaw && calibration && (performance.now() - latestRawAt) < 400) {
+  const now = performance.now();
+
+  if (latestRaw && calibration && (now - latestRawAt) < DATA_FRESHNESS_MS) {
     const mapped = applyCalibration(calibration, latestRaw.nx, latestRaw.ny);
     const clampedX = Math.max(0, Math.min(window.innerWidth, mapped.x));
     const clampedY = Math.max(0, Math.min(window.innerHeight, mapped.y));
 
-    smoothedX = (smoothedX === null) ? clampedX : smoothedX + (clampedX - smoothedX) * SMOOTHING_ALPHA;
-    smoothedY = (smoothedY === null) ? clampedY : smoothedY + (clampedY - smoothedY) * SMOOTHING_ALPHA;
+    // Nota: durante un parpadeo, startRawLoop no actualiza latestRaw, así
+    // que aquí se sigue alimentando el filtro con el último punto válido
+    // (congelado) — el cursor no se mueve, pero tampoco desaparece ni
+    // resetea el progreso de permanencia por un parpadeo normal.
+    smoothedX = filterX.filter(clampedX, now);
+    smoothedY = filterY.filter(clampedY, now);
 
     gazeCursor.style.display = "block";
     gazeCursor.style.left = smoothedX + "px";
@@ -782,6 +986,11 @@ function activeLoop(){
     gazeCursor.style.display = "none";
     dwellRing.style.display = "none";
     dwellTarget = null;
+    // Se perdió el rostro más allá de la ventana de gracia (no fue solo
+    // un parpadeo): se reinicia el filtro para evitar un salto de dt
+    // grande cuando el rostro vuelva a detectarse.
+    smoothedX = null; smoothedY = null;
+    filterX.reset(); filterY.reset();
   }
 
   requestAnimationFrame(activeLoop);
