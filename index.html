@@ -203,7 +203,7 @@
     <span class="icon" aria-hidden="true">✅</span>
     <h2>Sistema activo</h2>
     <p id="faceStatusDetail">Buscando tu rostro…</p>
-    <p id="sensitivityDetail" style="font-size:0.85rem; margin-top:-6px;">Sensibilidad: <span id="sensitivityValue">—</span></p>
+    <p id="sensitivityDetail" style="font-size:0.85rem; margin-top:-6px;">Sensibilidad: <span id="sensitivityValue">—</span> · Modo: <span id="trackingModeValue">—</span></p>
     <div class="buttonRow">
       <button id="btnToggleDebugVideo" type="button" class="secondary" data-dwell="true">Mostrar/ocultar cámara</button>
       <button id="btnRecalibrate" type="button" class="secondary" data-dwell="true">Recalibrar</button>
@@ -211,6 +211,9 @@
     <div class="buttonRow" style="margin-top:12px;">
       <button id="btnLessSensitive" type="button" class="secondary" data-dwell="true">Menos sensible</button>
       <button id="btnMoreSensitive" type="button" class="secondary" data-dwell="true">Más sensible</button>
+    </div>
+    <div class="buttonRow" style="margin-top:12px;">
+      <button id="btnToggleTrackingMode" type="button" class="secondary" data-dwell="true">Cambiar modo: ojos / cabeza</button>
     </div>
   </section>
 </main>
@@ -419,6 +422,8 @@ function refreshSensitivityLabel(){
   else if (m >= 0.15) label = "4";
   else label = "5 (muy sensible)";
   el("sensitivityValue").textContent = label;
+  const modeLabelEl = el("trackingModeValue");
+  if (modeLabelEl) modeLabelEl.textContent = TRACKING_MODE === "head" ? "Cabeza" : "Ojos";
 }
 function adjustSensitivity(delta){
   // delta positivo = más margen = MENOS sensible
@@ -451,6 +456,7 @@ function remapCalibrationMargin(calib, marginFactor){
 }
 el("btnLessSensitive").addEventListener("click", () => adjustSensitivity(0.12));
 el("btnMoreSensitive").addEventListener("click", () => adjustSensitivity(-0.12));
+el("btnToggleTrackingMode").addEventListener("click", toggleTrackingMode);
 
 // =========================================================================
 // === MediaPipe Setup ===
@@ -554,6 +560,59 @@ let onRawSample = null;    // callback opcional (usado durante calibración)
 let errorStreak = 0;
 let rawLoopHalted = false;
 
+function hasAnyExistingCalibration(){
+  for (let i = 0; i < localStorage.length; i++) {
+    const k = localStorage.key(i);
+    if (k && k.startsWith("av_calib_v3_")) return true;
+  }
+  return false;
+}
+
+// Modo de rastreo (auditoría / pedido explícito del usuario): "eye" usa el
+// centro del iris (muy preciso pero de rango físico minúsculo — cualquier
+// ruido se amplifica mucho al mapear a pantalla completa). "head" usa la
+// punta de la nariz, un punto rígido del cráneo: se mueve con la cabeza,
+// no con el parpadeo ni con micro-movimientos oculares, y su rango de
+// movimiento natural frente a la cámara es mayor — para alguien con más
+// control voluntario de cabeza que de ojos, esto da un cursor más estable
+// y más fácil de sostener sobre un objetivo.
+//
+// Compatibilidad: si ya existe una calibración guardada de una sesión
+// anterior (siempre en modo ojos, el único que existía hasta ahora), se
+// respeta ese modo para no invalidarla en silencio. Solo una instalación
+// nueva, sin ninguna calibración todavía, arranca directamente en modo
+// cabeza. Quien ya tenga la app calibrada puede cambiar de modo cuando
+// quiera con el botón "Cambiar modo".
+let TRACKING_MODE = localStorage.getItem("av_trackingMode");
+if (!TRACKING_MODE) {
+  TRACKING_MODE = hasAnyExistingCalibration() ? "eye" : "head";
+  localStorage.setItem("av_trackingMode", TRACKING_MODE);
+}
+
+function computeRawPoint(landmarks){
+  if (TRACKING_MODE === "head") {
+    // Landmark 1 = punta de la nariz en la topología de 478 puntos de
+    // MediaPipe Face Landmarker.
+    const nose = landmarks[1];
+    return { nx: 1 - nose.x, ny: nose.y };
+  }
+  const leftIris = landmarks[468];
+  const rightIris = landmarks[473];
+  const avgX = (leftIris.x + rightIris.x) / 2;
+  const avgY = (leftIris.y + rightIris.y) / 2;
+  return { nx: 1 - avgX, ny: avgY };
+}
+
+function toggleTrackingMode(){
+  TRACKING_MODE = TRACKING_MODE === "head" ? "eye" : "head";
+  localStorage.setItem("av_trackingMode", TRACKING_MODE);
+  refreshSensitivityLabel();
+  // El punto crudo cambia de fuente por completo (nariz vs. iris), así
+  // que una calibración hecha con el otro modo ya no es válida — se
+  // recalibra siempre al cambiar de modo.
+  startCalibration();
+}
+
 function blinkScoreFrom(faceBlendshapes){
   if (!faceBlendshapes || !faceBlendshapes.length) return 0;
   const categories = faceBlendshapes[0].categories || [];
@@ -586,28 +645,26 @@ function startRawLoop(){
 
       if (result.faceLandmarks && result.faceLandmarks.length > 0) {
         isBlinking = blinkScoreFrom(result.faceBlendshapes) > BLINK_THRESHOLD;
+        // El parpadeo solo degrada la señal en modo ojos (iris). En modo
+        // cabeza la punta de la nariz no se ve afectada por parpadear,
+        // así que ahí se ignora el gating y siempre se actualiza.
+        const shouldFreezeForBlink = TRACKING_MODE === "eye" && isBlinking;
 
-        if (!isBlinking) {
-          // Centros de iris (índices 468 y 473 del modelo face_landmarker.task,
-          // 478 landmarks). Se promedian ambos ojos y se espeja en X porque la
-          // cámara frontal entrega la imagen sin espejar internamente.
+        if (!shouldFreezeForBlink) {
           const lm = result.faceLandmarks[0];
-          const leftIris = lm[468];
-          const rightIris = lm[473];
-          const avgX = (leftIris.x + rightIris.x) / 2;
-          const avgY = (leftIris.y + rightIris.y) / 2;
-          latestRaw = { nx: 1 - avgX, ny: avgY };
+          latestRaw = computeRawPoint(lm);
           latestRawAt = nowMs;
           if (onRawSample) onRawSample(latestRaw);
           faceStatusDetail && (faceStatusDetail.textContent = "Rostro detectado — cursor activo.");
         } else {
-          // Parpadeo: deliberadamente NO se actualiza latestRaw/latestRawAt.
-          // El consumidor (activeLoop) seguirá viendo la última posición
-          // válida como "fresca" hasta DATA_FRESHNESS_MS, es decir, el
-          // cursor se congela en su sitio durante el parpadeo en vez de
-          // saltar con datos de iris ruidosos por el ojo cerrado. Si el
-          // parpadeo (u oclusión) dura más que ese umbral, el flujo normal
-          // de "sin dato reciente" toma el control (oculta cursor/dwell).
+          // Parpadeo en modo ojos: deliberadamente NO se actualiza
+          // latestRaw/latestRawAt. El consumidor (activeLoop) seguirá
+          // viendo la última posición válida como "fresca" hasta
+          // DATA_FRESHNESS_MS, es decir, el cursor se congela en su sitio
+          // durante el parpadeo en vez de saltar con datos de iris
+          // ruidosos por el ojo cerrado. Si el parpadeo (u oclusión) dura
+          // más que ese umbral, el flujo normal de "sin dato reciente"
+          // toma el control (oculta cursor/dwell).
           faceStatusDetail && (faceStatusDetail.textContent = "Rostro detectado — cursor activo.");
         }
       } else {
@@ -950,7 +1007,7 @@ let lastDisplayAt = null;
 // pantalla típica de teléfono en aprox. medio segundo, suficiente para
 // moverse con intención pero sin permitir el "teletransporte" de un
 // extremo a otro en un parpadeo de cámara.
-const MAX_CURSOR_SPEED_PX_S = Number(localStorage.getItem("av_maxCursorSpeed") || 2200);
+const MAX_CURSOR_SPEED_PX_S = Number(localStorage.getItem("av_maxCursorSpeed") || 1400);
 
 function clampStep(current, target, maxDelta){
   if (current === null) return target;
