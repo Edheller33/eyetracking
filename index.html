@@ -422,7 +422,7 @@ function refreshSensitivityLabel(){
 }
 function adjustSensitivity(delta){
   // delta positivo = más margen = MENOS sensible
-  const next = Math.min(0.75, Math.max(0.05, currentMarginFactorForCalib() + delta));
+  const next = Math.min(0.85, Math.max(0.05, currentMarginFactorForCalib() + delta));
   localStorage.setItem("av_marginFactor", String(next));
   refreshSensitivityLabel();
   // Mejora (auditoría P2): antes, cualquier cambio de sensibilidad exigía
@@ -939,6 +939,26 @@ const filterX = new OneEuroFilter(ONEEURO_MIN_CUTOFF, ONEEURO_BETA);
 const filterY = new OneEuroFilter(ONEEURO_MIN_CUTOFF, ONEEURO_BETA);
 
 let smoothedX = null, smoothedY = null;
+// Posición realmente pintada en pantalla, tras el límite de velocidad
+// (ver activeLoop). Separada de smoothedX/Y (salida cruda del filtro
+// Un-Euro) para poder acotar el salto entre un frame y el siguiente.
+let displayedX = null, displayedY = null;
+let lastDisplayAt = null;
+// Píxeles por segundo máximos que puede recorrer el cursor en pantalla.
+// Ajustable vía localStorage (av_maxCursorSpeed) si un caso particular
+// necesita más o menos margen. El valor por defecto permite cruzar una
+// pantalla típica de teléfono en aprox. medio segundo, suficiente para
+// moverse con intención pero sin permitir el "teletransporte" de un
+// extremo a otro en un parpadeo de cámara.
+const MAX_CURSOR_SPEED_PX_S = Number(localStorage.getItem("av_maxCursorSpeed") || 2200);
+
+function clampStep(current, target, maxDelta){
+  if (current === null) return target;
+  const diff = target - current;
+  if (Math.abs(diff) <= maxDelta) return target;
+  return current + Math.sign(diff) * maxDelta;
+}
+
 let dwellTarget = null, dwellStartedAt = 0, dwellCoolingDownUntil = 0;
 let activeLoopRunning = false;
 
@@ -947,6 +967,7 @@ function enterActiveState(){
   setStatus("ok", "Sistema activo");
   refreshSensitivityLabel();
   smoothedX = null; smoothedY = null;
+  displayedX = null; displayedY = null; lastDisplayAt = null;
   filterX.reset(); filterY.reset();
   dwellTarget = null;
   if (!activeLoopRunning) {
@@ -977,11 +998,25 @@ function activeLoop(){
     smoothedX = filterX.filter(clampedX, now);
     smoothedY = filterY.filter(clampedY, now);
 
-    gazeCursor.style.display = "block";
-    gazeCursor.style.left = smoothedX + "px";
-    gazeCursor.style.top = smoothedY + "px";
+    // Segunda capa de suavizado, aparte del filtro Un-Euro: un límite
+    // duro de velocidad de pantalla. El filtro Un-Euro reduce el jitter
+    // fino, pero deliberadamente permite pasar los movimientos rápidos
+    // sin retardo — y un giro leve de cabeza o un cambio de expresión
+    // puede producir, con el mapeo actual, un desplazamiento grande de
+    // golpe (lo que se ve como "teletransporte" del punto azul). Este
+    // límite acota cuántos píxeles puede avanzar el cursor por segundo,
+    // sin importar cuánto salte el dato de entrada.
+    const dtDisplay = lastDisplayAt === null ? 1/60 : Math.max((now - lastDisplayAt) / 1000, 0.001);
+    const maxDelta = MAX_CURSOR_SPEED_PX_S * dtDisplay;
+    displayedX = clampStep(displayedX, smoothedX, maxDelta);
+    displayedY = clampStep(displayedY, smoothedY, maxDelta);
+    lastDisplayAt = now;
 
-    updateDwell(smoothedX, smoothedY);
+    gazeCursor.style.display = "block";
+    gazeCursor.style.left = displayedX + "px";
+    gazeCursor.style.top = displayedY + "px";
+
+    updateDwell(displayedX, displayedY);
   } else {
     gazeCursor.style.display = "none";
     dwellRing.style.display = "none";
@@ -990,6 +1025,7 @@ function activeLoop(){
     // un parpadeo): se reinicia el filtro para evitar un salto de dt
     // grande cuando el rostro vuelva a detectarse.
     smoothedX = null; smoothedY = null;
+    displayedX = null; displayedY = null; lastDisplayAt = null;
     filterX.reset(); filterY.reset();
   }
 
