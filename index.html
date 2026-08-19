@@ -589,18 +589,72 @@ if (!TRACKING_MODE) {
   localStorage.setItem("av_trackingMode", TRACKING_MODE);
 }
 
+// -------------------------------------------------------------------------
+// Corrección de distancia a la cámara.
+//
+// Causa raíz de la imprecisión reportada ("me muevo rápido o estoy muy
+// cerca de la cámara"): nx/ny se leen como posición ABSOLUTA del punto
+// (nariz o iris) dentro del cuadro de la cámara, en [0,1]. Un mismo
+// movimiento físico de la cabeza (p. ej. girar un poco hacia un lado)
+// desplaza esa posición absoluta MÁS cuanto más cerca está la cara de la
+// cámara, porque la cara ocupa una fracción mayor del cuadro. La
+// calibración de 5 puntos fija una "ganancia" (xMin/xMax/yMin/yMax) para
+// la distancia que el usuario tenía EN ESE MOMENTO. Si luego se acerca,
+// esa misma ganancia queda demasiado alta y cualquier micro-movimiento se
+// traduce en un salto grande y difícil de controlar; si se aleja, ocurre
+// lo contrario (cursor lento/pesado). Esto se percibe como "menos preciso
+// que un mouse real", que sí tiene ganancia constante sin importar la
+// postura de la persona.
+//
+// Corrección: se usa la distancia entre las esquinas externas de los ojos
+// (landmarks 33 y 263) como referencia de "qué tan grande se ve la cara
+// en el cuadro" — un proxy directo, sin cámara de profundidad, de la
+// distancia física a la cámara. Se fija esa distancia como referencia al
+// iniciar la calibración (momento en que el usuario está en su postura
+// habitual) y, en cada frame, se reescala el desplazamiento del punto
+// crudo respecto al centro del cuadro por (referencia / actual). Esto
+// deja la ganancia aproximadamente constante sin importar si la persona
+// se acerca o se aleja unos centímetros después de calibrar.
+function eyeDistanceFrom(landmarks){
+  const l = landmarks[33];  // esquina externa del ojo derecho (en imagen)
+  const r = landmarks[263]; // esquina externa del ojo izquierdo (en imagen)
+  return Math.hypot(l.x - r.x, l.y - r.y);
+}
+
+// Límite de la corrección: si por una lectura ruidosa puntual la
+// distancia estimada se dispara, no se deja que el factor de escala se
+// vaya a extremos (eso sí produciría el "teletransporte" que se quiere
+// evitar). 0.5x–2x cubre con margen amplio el rango realista de
+// acercarse/alejarse frente a una webcam sin dejar de acotar el ruido.
+function clampDistanceScale(s){
+  return Math.max(0.5, Math.min(2, s));
+}
+
+// Se fija de nuevo al comenzar cada calibración (ver startCalibration),
+// para que la referencia sea siempre "la distancia en la que el usuario
+// suele sentarse", no un valor arrastrado de una sesión anterior.
+let referenceEyeDist = null;
+
 function computeRawPoint(landmarks){
+  const eyeDist = eyeDistanceFrom(landmarks);
+  if (referenceEyeDist === null) referenceEyeDist = eyeDist;
+  const distanceScale = clampDistanceScale(referenceEyeDist / eyeDist);
+
   if (TRACKING_MODE === "head") {
     // Landmark 1 = punta de la nariz en la topología de 478 puntos de
     // MediaPipe Face Landmarker.
     const nose = landmarks[1];
-    return { nx: 1 - nose.x, ny: nose.y };
+    const correctedX = 0.5 + (nose.x - 0.5) * distanceScale;
+    const correctedY = 0.5 + (nose.y - 0.5) * distanceScale;
+    return { nx: 1 - correctedX, ny: correctedY };
   }
   const leftIris = landmarks[468];
   const rightIris = landmarks[473];
   const avgX = (leftIris.x + rightIris.x) / 2;
   const avgY = (leftIris.y + rightIris.y) / 2;
-  return { nx: 1 - avgX, ny: avgY };
+  const correctedX = 0.5 + (avgX - 0.5) * distanceScale;
+  const correctedY = 0.5 + (avgY - 0.5) * distanceScale;
+  return { nx: 1 - correctedX, ny: correctedY };
 }
 
 function toggleTrackingMode(){
@@ -824,6 +878,12 @@ function startCalibration(){
   gazeCursor.style.display = "none";
   dwellRing.style.display = "none";
   setStatus("warn", "Calibrando…");
+
+  // Se toma la postura actual del usuario (justo antes de empezar los 5
+  // puntos) como nueva distancia de referencia para la corrección de
+  // cercanía/lejanía a la cámara. Así, la ganancia queda calibrada para
+  // la distancia real en la que la persona está sentada en este momento.
+  referenceEyeDist = null;
 
   if (!calibDotEl) {
     calibDotEl = document.createElement("div");
